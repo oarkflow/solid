@@ -52,7 +52,7 @@ export default defineConfig(({ command, mode, ssrBuild }) => ({
 
             if (normalized.includes('/src/core/tailwindcss/')) {
                 if (normalized.includes('tailwind.config.ts')) return 'tailwindcss.config';
-                return 'tailwindcss.core';
+                return 'tailwindcss';
             }
 
             if (normalized.includes('/src/') && !normalized.includes('/src/core/velocity/') && !normalized.includes('/src/core/tailwindcss/')) {

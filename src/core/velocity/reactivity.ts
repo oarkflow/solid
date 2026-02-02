@@ -11,11 +11,35 @@
 // Global State
 // ============================================================================
 
+// ============================================================================
+// Internal Types & State
+// ============================================================================
+
+type Link = {
+    source: SignalNode<any>;
+    target: Effect;
+    prevSub: Link | null;
+    nextSub: Link | null;
+    prevSource: Link | null;
+    nextSource: Link | null;
+};
+
 type Effect = {
     execute: () => void;
-    dependencies: Set<Set<Effect>>;
+    sources: Link | null;      // Head of dependency list (Link list)
+    sourcesTail: Link | null;  // Tail for fast appending
     cleanups: (() => void)[];
     owner: Owner | null;
+    status: number;            // For glitch-free/epoch tracking
+};
+
+type SignalNode<T> = {
+    value: T;
+    subs: Link | null;         // Head of subscriber list (Link list)
+    subsTail: Link | null;     // Tail for fast appending
+    equals: (prev: T, next: T) => boolean;
+    id?: number;               // Devtools id
+    name?: string;             // Devtools name
 };
 
 type Owner = {
@@ -39,9 +63,23 @@ let currentEffect: Effect | null = null;
 let currentOwner: Owner | null = null;
 let batchDepth = 0;
 let pendingEffects: Set<Effect> = new Set();
+let globalEpoch = 1;
+
+// Link Pool for memory efficiency
+const linkPool: Link[] = [];
+function createLink(source: SignalNode<any>, target: Effect): Link {
+    if (linkPool.length > 0) {
+        const link = linkPool.pop()!;
+        link.source = source;
+        link.target = target;
+        link.prevSub = link.nextSub = link.prevSource = link.nextSource = null;
+        return link;
+    }
+    return { source, target, prevSub: null, nextSub: null, prevSource: null, nextSource: null };
+}
 
 // ============================================================================
-// Devtools instrumentation
+// Devtools Instrumentation (Decoupled)
 // ============================================================================
 
 type DevEffectMeta = { id: number; runs: number; lastRun?: number; name?: string };
@@ -51,43 +89,47 @@ const devState = {
     enabled: false,
     effectCounter: 0,
     signalCounter: 0,
-    effects: new WeakMap<Effect, DevEffectMeta>(),
-    signals: new WeakMap<Set<Effect>, DevSignalMeta>(),
 };
 
-// Strong registries for snapshotting (only populated when devtools enabled)
 const devEffectsRegistry = new Map<Effect, DevEffectMeta>();
-const devSignalsRegistry = new Map<Set<Effect>, DevSignalMeta>();
-
-// Component -> signals/effects mapping
+const devSignalsRegistry = new Map<SignalNode<any>, DevSignalMeta>();
 const devComponentSignals = new Map<number, Set<number>>();
 const devComponentEffects = new Map<number, Set<number>>();
-
-// Effect -> signals mapping and effect ownership
 const devEffectSignals = new Map<number, Set<number>>();
 const devEffectOwner = new Map<number, number | undefined>();
 
-
-function createOwner(parent: Owner | null): Owner {
-    return {
-        parent,
-        cleanups: [],
-        errorHandlers: new Set(),
-        effects: new Set(),
-        suspense: parent?.suspense,
-        transition: undefined,
-    };
-}
-
 function stopEffect(effect: Effect) {
+    // Run cleanups
     for (const cleanup of effect.cleanups) {
         try { cleanup(); } catch (error) { console.error(error); }
     }
     effect.cleanups = [];
-    for (const deps of effect.dependencies) {
-        deps.delete(effect);
+
+    // Cleanup and recycle links from sources
+    let link = effect.sources;
+    while (link) {
+        const next = link.nextSource;
+        const source = link.source;
+
+        // Remove from source's subscribers
+        if (link.prevSub) link.prevSub.nextSub = link.nextSub;
+        else source.subs = link.nextSub;
+        if (link.nextSub) link.nextSub.prevSub = link.prevSub;
+        else source.subsTail = link.prevSub;
+
+        // Recyle link
+        linkPool.push(link);
+        link = next;
     }
-    effect.dependencies.clear();
+    effect.sources = effect.sourcesTail = null;
+
+    // Cleanup devtools metadata
+    const devMeta = devEffectsRegistry.get(effect);
+    if (devMeta) {
+        devEffectSignals.delete(devMeta.id);
+        devEffectOwner.delete(devMeta.id);
+        devEffectsRegistry.delete(effect);
+    }
 }
 
 function disposeOwner(owner: Owner) {
@@ -178,6 +220,7 @@ export function getComponentDeps(componentId: number) {
 }
 
 // ============================================================================
+// ============================================================================
 // Core Primitives
 // ============================================================================
 
@@ -188,97 +231,114 @@ export function createSignal<T>(
     initialValue: T,
     options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
 ): [() => T, (value: T | ((prev: T) => T)) => void] {
-    let value = initialValue;
-    const subscribers = new Set<Effect>();
+    const node: SignalNode<T> = {
+        value: initialValue,
+        subs: null,
+        subsTail: null,
+        equals: options?.equals === false
+            ? () => false
+            : options?.equals ?? Object.is,
+        name: options?.name,
+    };
 
-    // Register signal metadata for devtools
-    const signalMeta: DevSignalMeta = { id: ++devState.signalCounter, reads: 0, writes: 0, name: options?.name, getValue: () => value };
-    devState.signals.set(subscribers, signalMeta);
-    devSignalsRegistry.set(subscribers, signalMeta);
-
-    const equals = options?.equals === false
-        ? () => false
-        : options?.equals ?? Object.is;
+    if (devState.enabled) {
+        node.id = ++devState.signalCounter;
+        const meta: DevSignalMeta = { id: node.id, reads: 0, writes: 0, name: node.name, getValue: () => node.value };
+        devSignalsRegistry.set(node, meta);
+    }
 
     const read = (): T => {
-        // Track this signal as a dependency of the current effect
         if (currentEffect) {
-            subscribers.add(currentEffect);
-            currentEffect.dependencies.add(subscribers);
-        }
-        if (devState.enabled) {
-            const meta = devState.signals.get(subscribers);
-            if (meta) meta.reads++;
-
-            // Attribute read to current effect (if any)
-            if (currentEffect) {
-                const effMeta = devState.effects.get(currentEffect) || devEffectsRegistry.get(currentEffect);
-                if (effMeta) {
-                    let set = devEffectSignals.get(effMeta.id);
-                    if (!set) {
-                        set = new Set();
-                        devEffectSignals.set(effMeta.id, set);
-                    }
-                    if (meta) {
-                        set.add(meta.id);
-
-                        // If effect is owned by a component, attach signal to component as well
-                        const owner = devEffectOwner.get(effMeta.id);
-                        if (owner != null) {
-                            let cs = devComponentSignals.get(owner);
-                            if (!cs) {
-                                cs = new Set();
-                                devComponentSignals.set(owner, cs);
-                            }
-                            cs.add(meta.id);
-                        }
-                    }
+            // Check if already tracking
+            let link = currentEffect.sources;
+            let exists = false;
+            while (link) {
+                if (link.source === node) {
+                    exists = true;
+                    break;
                 }
-            } else {
-                // If there is a current component executing directly, map component -> signal
-                const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-                if (compId != null && devSignalsRegistry.has(subscribers)) {
-                    const sigMeta = devSignalsRegistry.get(subscribers)!;
-                    let set = devComponentSignals.get(compId);
-                    if (!set) {
-                        set = new Set();
-                        devComponentSignals.set(compId, set);
-                    }
-                    set.add(sigMeta.id);
+                link = link.nextSource;
+            }
+
+            if (!exists) {
+                const newLink = createLink(node, currentEffect);
+
+                // Add to signal's subscribers
+                if (node.subsTail) {
+                    node.subsTail.nextSub = newLink;
+                    newLink.prevSub = node.subsTail;
+                    node.subsTail = newLink;
+                } else {
+                    node.subs = node.subsTail = newLink;
+                }
+
+                // Add to effect's sources
+                if (currentEffect.sourcesTail) {
+                    currentEffect.sourcesTail.nextSource = newLink;
+                    newLink.prevSource = currentEffect.sourcesTail;
+                    currentEffect.sourcesTail = newLink;
+                } else {
+                    currentEffect.sources = currentEffect.sourcesTail = newLink;
                 }
             }
         }
-        return value;
+
+        if (devState.enabled) {
+            const meta = devSignalsRegistry.get(node);
+            if (meta) {
+                meta.reads++;
+                if (currentEffect) {
+                    const effMeta = devEffectsRegistry.get(currentEffect);
+                    if (effMeta) {
+                        let set = devEffectSignals.get(effMeta.id);
+                        if (!set) { set = new Set(); devEffectSignals.set(effMeta.id, set); }
+                        set.add(meta.id);
+                        const owner = devEffectOwner.get(effMeta.id);
+                        if (owner != null) {
+                            let cs = devComponentSignals.get(owner);
+                            if (!cs) { cs = new Set(); devComponentSignals.set(owner, cs); }
+                            cs.add(meta.id);
+                        }
+                    }
+                } else {
+                    const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+                    if (compId != null) {
+                        let set = devComponentSignals.get(compId);
+                        if (!set) { set = new Set(); devComponentSignals.set(compId, set); }
+                        set.add(meta.id);
+                    }
+                }
+            }
+        }
+        return node.value;
     };
 
     const write = (nextValue: T | ((prev: T) => T)): void => {
         const newValue = typeof nextValue === 'function'
-            ? (nextValue as (prev: T) => T)(value)
+            ? (nextValue as (prev: T) => T)(node.value)
             : nextValue;
 
-        // Skip if values are equal
-        if (equals(value, newValue)) {
-            return;
-        }
+        if (node.equals(node.value, newValue)) return;
 
-        value = newValue;
+        node.value = newValue;
 
         if (devState.enabled) {
-            const meta = devState.signals.get(subscribers);
+            const meta = devSignalsRegistry.get(node);
             if (meta) meta.writes++;
         }
 
-        // Notify all subscribers
         if (batchDepth > 0) {
-            // Batched: queue effects
-            for (const effect of subscribers) {
-                pendingEffects.add(effect);
+            let link = node.subs;
+            while (link) {
+                pendingEffects.add(link.target);
+                link = link.nextSub;
             }
         } else {
-            // Immediate: run effects synchronously
-            const effects = [...subscribers];
-            for (const effect of effects) {
-                runEffect(effect);
+            globalEpoch++;
+            let link = node.subs;
+            while (link) {
+                runEffect(link.target);
+                link = link.nextSub;
             }
         }
     };
@@ -290,37 +350,45 @@ export function createSignal<T>(
  * Run an effect, cleaning up first
  */
 function runEffect(effect: Effect) {
-    // Dev: record run
-    const devMeta = devState.effects.get(effect) || devEffectsRegistry.get(effect);
-    if (devMeta) {
-        devMeta.runs++;
-        devMeta.lastRun = Date.now();
+    if (effect.status === globalEpoch) return;
+    effect.status = globalEpoch;
 
-        // If a component is executing now, attribute this effect to it
-        const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-        if (compId != null) {
-            let set = devComponentEffects.get(compId);
-            if (!set) {
-                set = new Set();
-                devComponentEffects.set(compId, set);
+    // Dev: record run
+    if (devState.enabled) {
+        const devMeta = devEffectsRegistry.get(effect);
+        if (devMeta) {
+            devMeta.runs++;
+            devMeta.lastRun = Date.now();
+            const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+            if (compId != null) {
+                let set = devComponentEffects.get(compId);
+                if (!set) { set = new Set(); devComponentEffects.set(compId, set); }
+                set.add(devMeta.id);
             }
-            set.add(devMeta.id);
         }
     }
 
-    // Run cleanups
+    // Run cleanups (but don't dispose links yet, we might want to optimize that)
     for (const cleanup of effect.cleanups) {
         try { cleanup(); } catch (e) { console.error(e); }
     }
     effect.cleanups = [];
 
-    // Remove from all dependency sets
-    for (const deps of effect.dependencies) {
-        deps.delete(effect);
+    // Full cleanup of links before re-run (Simplest version of re-tracking)
+    // We could optimize by only removing links that aren't accessed again.
+    let link = effect.sources;
+    while (link) {
+        const next = link.nextSource;
+        const source = link.source;
+        if (link.prevSub) link.prevSub.nextSub = link.nextSub;
+        else source.subs = link.nextSub;
+        if (link.nextSub) link.nextSub.prevSub = link.prevSub;
+        else source.subsTail = link.prevSub;
+        linkPool.push(link);
+        link = next;
     }
-    effect.dependencies.clear();
+    effect.sources = effect.sourcesTail = null;
 
-    // Run the effect
     const prevEffect = currentEffect;
     const prevOwner = currentOwner;
     currentEffect = effect;
@@ -339,40 +407,47 @@ function runEffect(effect: Effect) {
     }
 }
 
+function createOwner(parent: Owner | null): Owner {
+    return {
+        parent,
+        cleanups: [],
+        errorHandlers: new Set(),
+        effects: new Set(),
+        suspense: parent?.suspense,
+        transition: undefined,
+    };
+}
+
 /**
  * Creates a reactive effect
  */
 export function createEffect(fn: () => void, options?: { name?: string }): void {
     const effect: Effect = {
         execute: fn,
-        dependencies: new Set(),
+        sources: null,
+        sourcesTail: null,
         cleanups: [],
         owner: currentOwner,
+        status: -1,
     };
 
     if (currentOwner) {
         currentOwner.effects.add(effect);
     }
 
-    // Dev meta and ownership
-    const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0, name: options?.name ?? fn.name };
-    devState.effects.set(effect, meta);
-    devEffectsRegistry.set(effect, meta);
+    if (devState.enabled) {
+        const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0, name: options?.name ?? fn.name };
+        devEffectsRegistry.set(effect, meta);
 
-    // If a component is currently executing, mark this effect as owned by it
-    const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-    if (compId != null) {
-        devEffectOwner.set(meta.id, compId);
-        let set = devComponentEffects.get(compId);
-        if (!set) {
-            set = new Set();
-            devComponentEffects.set(compId, set);
+        const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+        if (compId != null) {
+            devEffectOwner.set(meta.id, compId);
+            let set = devComponentEffects.get(compId);
+            if (!set) { set = new Set(); devComponentEffects.set(compId, set); }
+            set.add(meta.id);
         }
-        set.add(meta.id);
+        devEffectSignals.set(meta.id, new Set());
     }
-
-    // Ensure there is an entry for effect->signals
-    devEffectSignals.set(meta.id, new Set());
 
     // Run immediately
     runEffect(effect);
@@ -405,10 +480,19 @@ export function batch<T>(fn: () => T): T {
     } finally {
         batchDepth--;
         if (batchDepth === 0) {
-            const effects = [...pendingEffects];
-            pendingEffects.clear();
-            for (const effect of effects) {
-                runEffect(effect);
+            // Elevate batch depth to prevent recursive execution (enforce BFS)
+            batchDepth++;
+            globalEpoch++;
+            try {
+                while (pendingEffects.size > 0) {
+                    const effects = Array.from(pendingEffects);
+                    pendingEffects.clear();
+                    for (const effect of effects) {
+                        runEffect(effect);
+                    }
+                }
+            } finally {
+                batchDepth--;
             }
         }
     }

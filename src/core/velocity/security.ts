@@ -188,7 +188,16 @@ function sanitizeWithRegex(html: string, allowTags: string[], maxLength?: number
     });
 
     // Remove javascript: URLs
-    result = result.replace(/\s*(href|src|action)\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, '');
+    result = result.replace(/\s*(href|src|action|poster|background)\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, '');
+
+    // Remove data: URLs except for images if configured
+    result = result.replace(/\s*(href|src|action|poster|background)\s*=\s*["']?\s*data:[^"'\s>]+/gi, (match) => {
+        return match.toLowerCase().includes('data:image/') ? match : '';
+    });
+
+    // Remove event handlers and script content
+    result = result.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
+    result = result.replace(/on\w+\s*=\s*["'][^"']*["']/gi, '');
 
     return maxLength ? result.slice(0, maxLength) : result;
 }
@@ -347,15 +356,28 @@ export interface CSPDirective {
 }
 
 /**
- * Generate a cryptographically secure nonce (browser only)
+ * Generate a cryptographically secure nonce
  */
 export function generateNonce(): string {
+    // Browser
     if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
         const array = new Uint8Array(16);
         crypto.getRandomValues(array);
         return btoa(String.fromCharCode(...array));
     }
-    // Fallback for SSR
+
+    // SSR (Node.js)
+    try {
+        const nodeCrypto = (globalThis as any).require?.('crypto');
+        if (nodeCrypto && nodeCrypto.randomBytes) {
+            return nodeCrypto.randomBytes(16).toString('base64');
+        }
+    } catch {
+        // Fallback for non-Node SSR or failed require
+    }
+
+    // Last resort fallback (non-secure)
+    console.warn('[Security] Using weak nonce fallback. Use in production with caution.');
     return Math.random().toString(36).substring(2) + Date.now().toString(36);
 }
 

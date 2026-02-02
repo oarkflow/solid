@@ -116,39 +116,145 @@ export type RouterApi = {
 };
 
 // ============================================================================
+// Route Matching (Radix Trie)
+// ============================================================================
+
+type RadixNode = {
+    children: Map<string, RadixNode>;
+    param?: string;
+    wildcard?: boolean;
+    stack?: CompiledRoute[]; // Stack of routes (for nested outlets)
+};
+
+function createRadixNode(): RadixNode {
+    return { children: new Map() };
+}
+
+const rootNode = createRadixNode();
+
+function insertRoute(route: CompiledRoute, parentStack: CompiledRoute[] = []) {
+    let current = rootNode;
+    const stack = [...parentStack, route];
+    const parts = route.path.split('/').filter(p => p !== '');
+
+    if (parts.length === 0 && parentStack.length === 0) {
+        current.stack = stack;
+    } else {
+        for (const part of parts) {
+            if (part.startsWith(':')) {
+                let paramNode = current.children.get(':');
+                if (!paramNode) {
+                    paramNode = createRadixNode();
+                    paramNode.param = part.slice(1);
+                    current.children.set(':', paramNode);
+                }
+                current = paramNode;
+            } else if (part.startsWith('*')) {
+                let wildNode = current.children.get('*');
+                if (!wildNode) {
+                    wildNode = createRadixNode();
+                    wildNode.wildcard = true;
+                    wildNode.param = part.slice(1) || 'path';
+                    current.children.set('*', wildNode);
+                }
+                current = wildNode;
+                break;
+            } else {
+                let next = current.children.get(part);
+                if (!next) {
+                    next = createRadixNode();
+                    current.children.set(part, next);
+                }
+                current = next;
+            }
+        }
+        current.stack = stack;
+    }
+
+    if (route.children) {
+        for (const child of route.children) {
+            insertRoute(child, stack);
+        }
+    }
+}
+
+function findMatch(path: string): { stack: CompiledRoute[]; params: Record<string, string> } | null {
+    const parts = path.split('/').filter(p => p !== '');
+    const params: Record<string, string> = {};
+
+    function search(node: RadixNode, index: number): CompiledRoute[] | null {
+        if (index === parts.length) return node.stack || null;
+
+        const part = parts[index];
+
+        const exact = node.children.get(part);
+        if (exact) {
+            const res = search(exact, index + 1);
+            if (res) return res;
+        }
+
+        const paramNode = node.children.get(':');
+        if (paramNode) {
+            const res = search(paramNode, index + 1);
+            if (res) {
+                params[paramNode.param!] = decodeURIComponent(part);
+                return res;
+            }
+        }
+
+        const wildNode = node.children.get('*');
+        if (wildNode) {
+            params[wildNode.param!] = parts.slice(index).map(decodeURIComponent).join('/');
+            return wildNode.stack || null;
+        }
+
+        return null;
+    }
+
+    const stack = search(rootNode, 0);
+    return stack ? { stack, params } : null;
+}
+
+// ============================================================================
 // Security
 // ============================================================================
 
-const DANGEROUS_PROTOCOLS = /^(javascript|data|vbscript):/i;
-
-/**
- * Sanitize and validate navigation path
- */
 function sanitizePath(to: string): string | null {
-    if (typeof to !== 'string') return null;
+    if (!to) return null;
 
-    const trimmed = to.trim();
-    if (DANGEROUS_PROTOCOLS.test(trimmed.toLowerCase())) {
-        console.warn(`[Router] Blocked dangerous URL: ${to}`);
+    // Block potential protocol attacks (javascript:, data:, etc.)
+    const lower = to.trim().toLowerCase();
+    if (lower.startsWith('javascript:') || lower.startsWith('data:') || lower.startsWith('vbscript:')) {
+        console.warn(`[Router] Blocked dangerous protocol: ${to}`);
         return null;
     }
 
     try {
-        const url = new URL(to, window.location.origin);
+        // Handle absolute URLs
+        if (to.includes('://')) {
+            const url = new URL(to);
+            if (url.origin !== window.location.origin) {
+                console.warn(`[Router] Blocked external navigation: ${to}`);
+                return null;
+            }
+            return url.pathname + url.search + url.hash;
+        }
 
-        // Block external navigation
-        if (url.origin !== window.location.origin) {
-            console.warn(`[Router] Blocked external navigation: ${to}`);
+        // Handle protocol-relative URLs
+        if (to.startsWith('//')) {
             return null;
         }
 
-        return url.pathname + url.search + url.hash;
-    } catch {
-        // If URL parsing fails, treat as relative path
+        // Must be a relative path or absolute path within same origin
         if (to.startsWith('/')) {
             return to;
         }
-        return null;
+
+        // Relative path: Resolve against current pathname to be safe
+        const resolved = new URL(to, window.location.href);
+        return resolved.pathname + resolved.search + resolved.hash;
+    } catch {
+        return to.startsWith('/') ? to : null;
     }
 }
 
@@ -320,6 +426,10 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
     }
 
     const compiled = compileRoutes(routes);
+    const matchCache = new Map<string, { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null>();
+
+    // Populate Radix Trie
+    compiled.forEach(r => insertRoute(r));
 
     const headManager = createHeadManager(options?.head);
     const globalMiddlewares = options?.middlewares ?? [];
@@ -435,59 +545,21 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         const currentPath = normalizePath(path());
         const currentQuery = query();
 
-        const extractParams = (route: CompiledRoute, match: RegExpExecArray | null) => {
-            const nextParams: Record<string, string> = {};
-            if (!match) return nextParams;
-            route.keys.forEach((key, index) => {
-                const value = match[index + 1];
-                if (value) {
-                    nextParams[key] = decodeURIComponent(value);
-                }
-            });
-            return nextParams;
-        };
+        // Check cache first
+        const cacheKey = currentPath + currentQuery.toString();
+        let matched = matchCache.get(cacheKey);
 
-        const findBestMatch = (routesToSearch: CompiledRoute[]): { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null => {
-            let best: { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null = null;
-
-            for (const route of routesToSearch) {
-                const hasChildren = Boolean(route.children && route.children.length);
-                const prefixMatch = hasChildren ? route.prefixRegex.exec(currentPath) : null;
-                const exactMatch = route.regex.exec(currentPath);
-
-                if (!hasChildren && !exactMatch) continue;
-                if (hasChildren && !prefixMatch && !exactMatch) continue;
-
-                const baseMatch = prefixMatch ?? exactMatch;
-                const baseParams = extractParams(route, baseMatch);
-
-                let candidate: { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null = null;
-                if (hasChildren) {
-                    const childMatch = findBestMatch(route.children!);
-                    if (childMatch) {
-                        candidate = {
-                            stack: [route, ...childMatch.stack],
-                            params: { ...baseParams, ...childMatch.params },
-                            score: route.score + childMatch.score,
-                        };
-                    }
-                }
-
-                if (!candidate && exactMatch) {
-                    candidate = { stack: [route], params: baseParams, score: route.score };
-                }
-
-                if (candidate) {
-                    if (!best || candidate.score > best.score || candidate.stack.length > best.stack.length) {
-                        best = candidate;
-                    }
-                }
+        if (!matched) {
+            const res = findMatch(currentPath);
+            if (res) {
+                matched = {
+                    stack: res.stack,
+                    params: res.params,
+                    score: 0 // Score not needed for trie but kept for type compatibility
+                };
             }
-
-            return best;
-        };
-
-        const matched = findBestMatch(compiled);
+            matchCache.set(cacheKey, matched || null);
+        }
 
         if (matched) {
             let routeMeta: RouteMeta | undefined;
@@ -657,6 +729,6 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
 
     // Set global exports
     _setGlobalRouter(LocalLink, localUseRouter);
-    
+
     return { Router, Link: LocalLink, useRouter: localUseRouter, Outlet };
 }

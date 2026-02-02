@@ -188,8 +188,8 @@ export function createStore<T extends object>(
             defaultValue: null
         });
 
-        try {
-            const stored = storage.get();
+        // Load initial state
+        storage.get().then(stored => {
             if (stored && typeof stored === 'object') {
                 const data = stored as { version?: number; state?: T };
                 if (data.state) {
@@ -200,22 +200,20 @@ export function createStore<T extends object>(
                     }
                 }
             }
-        } catch (e) {
+        }).catch(e => {
             console.warn('[Store] Failed to load from storage:', e);
-        }
+        });
 
         createEffect(() => {
             const currentState = state();
-            try {
-                const payload = {
-                    version: options.version,
-                    state: currentState,
-                    timestamp: Date.now(),
-                };
-                storage.set(payload);
-            } catch (e) {
+            const payload = {
+                version: options.version,
+                state: currentState,
+                timestamp: Date.now(),
+            };
+            storage.set(payload).catch(e => {
                 console.warn('[Store] Failed to persist to storage:', e);
-            }
+            });
         }, { name: `store:${options.storageKey}` });
     }
 

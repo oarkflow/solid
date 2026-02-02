@@ -61,27 +61,79 @@ export type StorageListener<T> = (event: StorageEvent<T>) => void;
  * Encryption helpers
  * ========================= */
 
-function encrypt(value: string, key: string): string {
-    // Encode to UTF-8 bytes first to handle Unicode
-    const utf8Bytes = new TextEncoder().encode(value);
-    let result = "";
-    for (let i = 0; i < utf8Bytes.length; i++) {
-        result += String.fromCharCode(
-            utf8Bytes[i] ^ key.charCodeAt(i % key.length)
-        );
-    }
-    return btoa(result);
+async function encrypt(value: string, key: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(value);
+
+    // Derive key from password using PBKDF2
+    const keyMaterial = await crypto.subtle.importKey(
+        'raw',
+        encoder.encode(key),
+        'PBKDF2',
+        false,
+        ['deriveKey']
+    );
+
+    const cryptoKey = await crypto.subtle.deriveKey(
+        {
+            name: 'PBKDF2',
+            salt: encoder.encode('velocity-storage-salt'),
+            iterations: 100000,
+            hash: 'SHA-256'
+        },
+        keyMaterial,
+        { name: 'AES-GCM', length: 256 },
+        false,
+        ['encrypt']
+    );
+
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const ciphertext = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv },
+        cryptoKey,
+        data
+    );
+
+    return btoa(String.fromCharCode(...new Uint8Array(iv.buffer)) + String.fromCharCode(...new Uint8Array(ciphertext)));
 }
 
-function decrypt(value: string, key: string): string {
+async function decrypt(value: string, key: string): Promise<string> {
     try {
-        const decoded = atob(value);
-        const bytes = new Uint8Array(decoded.length);
-        for (let i = 0; i < decoded.length; i++) {
-            bytes[i] = decoded.charCodeAt(i) ^ key.charCodeAt(i % key.length);
-        }
-        // Decode from UTF-8 bytes back to string
-        return new TextDecoder().decode(bytes);
+        const decoder = new TextDecoder();
+        const raw = new Uint8Array(atob(value).split('').map(c => c.charCodeAt(0)));
+        const iv = raw.slice(0, 12);
+        const ciphertext = raw.slice(12);
+
+        // Derive key from password using PBKDF2
+        const encoder = new TextEncoder();
+        const keyMaterial = await crypto.subtle.importKey(
+            'raw',
+            encoder.encode(key),
+            'PBKDF2',
+            false,
+            ['deriveKey']
+        );
+
+        const cryptoKey = await crypto.subtle.deriveKey(
+            {
+                name: 'PBKDF2',
+                salt: encoder.encode('velocity-storage-salt'),
+                iterations: 100000,
+                hash: 'SHA-256'
+            },
+            keyMaterial,
+            { name: 'AES-GCM', length: 256 },
+            false,
+            ['decrypt']
+        );
+
+        const plaintext = await crypto.subtle.decrypt(
+            { name: 'AES-GCM', iv },
+            cryptoKey,
+            ciphertext
+        );
+
+        return decoder.decode(plaintext);
     } catch {
         throw new Error("Invalid encrypted data");
     }
@@ -183,7 +235,7 @@ export function createStorage<T>(
         listeners.forEach((l) => l(event));
     }
 
-    function load(): T {
+    async function load(): Promise<T> {
         if (cache && cachedValue !== null) return cachedValue;
 
         const raw = storage.getItem(key);
@@ -191,7 +243,7 @@ export function createStorage<T>(
 
         try {
             const decoded = useEncryption
-                ? decrypt(raw, encryptionKey!)
+                ? await decrypt(raw, encryptionKey!)
                 : raw;
 
             const item = deserialize(decoded) as StorageItem<T>;
@@ -205,7 +257,7 @@ export function createStorage<T>(
 
             if (migrate && version !== item.version) {
                 value = migrate(value, item.version);
-                save(value);
+                await save(value);
             }
 
             if (validate && !validate(value)) {
@@ -220,7 +272,7 @@ export function createStorage<T>(
         }
     }
 
-    function save(value: T) {
+    async function save(value: T) {
         const item: StorageItem<T> = {
             value,
             version,
@@ -231,7 +283,7 @@ export function createStorage<T>(
 
         let serialized = serialize(item);
         if (useEncryption) {
-            serialized = encrypt(serialized, encryptionKey!);
+            serialized = await encrypt(serialized, encryptionKey!);
         }
 
         storage.setItem(key, serialized);
@@ -240,24 +292,24 @@ export function createStorage<T>(
 
     return {
         /** Reactive getter */
-        get(): T {
-            return load();
+        async get(): Promise<T> {
+            return await load();
         },
 
         /** Setter */
-        set(next: T | ((prev: T) => T)) {
-            const prev = load();
+        async set(next: T | ((prev: T) => T)) {
+            const prev = await load();
             const value = typeof next === "function"
                 ? (next as (p: T) => T)(prev)
                 : next;
 
-            save(value);
+            await save(value);
             notify("set", prev, value);
         },
 
         /** Remove value */
-        remove() {
-            const prev = load();
+        async remove() {
+            const prev = await load();
             storage.removeItem(key);
             cachedValue = null;
             notify("remove", prev, null);
@@ -269,8 +321,8 @@ export function createStorage<T>(
         },
 
         /** Non-reactive read */
-        peek() {
-            return load();
+        async peek() {
+            return await load();
         },
 
         /** Subscribe */
@@ -294,13 +346,13 @@ export function createStorage<T>(
         },
 
         /** Check expiry */
-        isExpired() {
+        async isExpired() {
             const raw = storage.getItem(key);
             if (!raw) return false;
 
             try {
                 const decoded = useEncryption
-                    ? decrypt(raw, encryptionKey!)
+                    ? await decrypt(raw, encryptionKey!)
                     : raw;
 
                 const item = deserialize(decoded) as StorageItem<T>;
@@ -311,9 +363,9 @@ export function createStorage<T>(
         },
 
         /** Refresh TTL */
-        refreshTTL() {
-            const value = load();
-            save(value);
+        async refreshTTL() {
+            const value = await load();
+            await save(value);
         },
     };
 }

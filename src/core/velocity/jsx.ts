@@ -161,6 +161,101 @@ function setAttr(el: Element, key: string, value: any, isSvg: boolean) {
 }
 
 // ============================================================================
+// Reconciliation
+// ============================================================================
+
+/**
+ * Optimized reconciliation algorithm for arrays of nodes
+ */
+export function reconcile(
+    parent: Node,
+    prev: Node[],
+    next: any[],
+    before: Node | null = null
+): Node[] {
+    const nextNodes: Node[] = [];
+    const prevLen = prev.length;
+    const nextLen = next.length;
+
+    // Fast path for empty lists
+    if (nextLen === 0) {
+        for (let i = 0; i < prevLen; i++) {
+            const n = prev[i];
+            if (n instanceof Element) {
+                const meta = elementRegistry.get(n);
+                if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(n); }
+            }
+            n.parentNode?.removeChild(n);
+        }
+        return [];
+    }
+
+    // Fast path for same content (reference equality)
+    if (prevLen === nextLen) {
+        let identical = true;
+        for (let i = 0; i < nextLen; i++) {
+            if (prev[i] !== next[i]) {
+                identical = false;
+                break;
+            }
+        }
+        if (identical) return prev;
+    }
+
+    // Map-based reconciliation (Keyed)
+    const prevMap = new Map<any, Node>();
+    for (const p of prev) {
+        // Use a unique property if available, or the node itself
+        const key = (p as any)._key ?? p;
+        prevMap.set(key, p);
+    }
+
+    const nextSet = new Set();
+    const result: Node[] = [];
+
+    let currentBefore = before;
+
+    // Phase 1: Create/Reuse nodes and place them in the correct order
+    // Note: This is an O(N) simplified reconciler. Robust ones do move optimization.
+    for (let i = nextLen - 1; i >= 0; i--) {
+        const item = next[i];
+        let node: Node;
+
+        const key = (item && typeof item === 'object') ? (item.id ?? item.key ?? item) : item;
+
+        if (prevMap.has(key)) {
+            node = prevMap.get(key)!;
+            prevMap.delete(key);
+        } else if (item instanceof Node) {
+            node = item;
+        } else if (item == null || item === false || item === true) {
+            continue;
+        } else {
+            node = document.createTextNode(String(item));
+        }
+
+        if (node.nextSibling !== currentBefore || node.parentNode !== parent) {
+            parent.insertBefore(node, currentBefore);
+        }
+
+        result.unshift(node);
+        nextSet.add(node);
+        currentBefore = node;
+    }
+
+    // Phase 2: Cleanup nodes that are no longer present
+    for (const [key, node] of prevMap.entries()) {
+        if (node instanceof Element) {
+            const meta = elementRegistry.get(node);
+            if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(node); }
+        }
+        node.parentNode?.removeChild(node);
+    }
+
+    return result;
+}
+
+// ============================================================================
 // Child Insertion
 // ============================================================================
 
@@ -182,8 +277,10 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
 
     if (Array.isArray(child)) {
         const frag = document.createDocumentFragment();
+        const nodes: Node[] = [];
         for (const c of child.flat(Infinity)) {
-            insertChild(frag, c);
+            const n = insertChild(frag, c);
+            if (n) nodes.push(n);
         }
         parent.insertBefore(frag, before);
         return null;
@@ -191,78 +288,25 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
 
     // Reactive child (function)
     if (typeof child === 'function') {
-        const marker = document.createComment('');
-        parent.insertBefore(marker, before);
+        const startMarker = document.createComment('start');
+        const endMarker = document.createComment('end');
+        parent.insertBefore(startMarker, before);
+        parent.insertBefore(endMarker, before);
 
         let nodes: Node[] = [];
 
         createEffect(() => {
-            // Remove old nodes (also cleanup registry entries)
-            for (const n of nodes) {
-                if (n.nodeType === 1) {
-                    const el = n as Element;
-                    const meta = elementRegistry.get(el);
-                    if (meta) {
-                        elementIdMap.delete(meta.id);
-                        elementRegistry.delete(el);
-                    }
-                }
-                n.parentNode?.removeChild(n);
-            }
-            nodes = [];
-
-            // Get new value
             const value = child();
+            const nextValue = Array.isArray(value) ? value.flat(Infinity) : [value];
+            nodes = reconcile(parent, nodes, nextValue, endMarker);
 
-            if (value == null || value === false || value === true) {
-                return;
-            }
-
-            if (typeof value === 'string' || typeof value === 'number') {
-                const text = document.createTextNode(String(value));
-                parent.insertBefore(text, marker.nextSibling);
-                nodes.push(text);
-            } else if (value instanceof Node) {
-                parent.insertBefore(value, marker.nextSibling);
-                nodes.push(value);
-                // ensure element ownership is correct for inserted nodes
-                if (value.nodeType === 1) {
-                    const el = value as Element;
-                    const meta = elementRegistry.get(el);
-                    const compId = componentStack.length ? componentStack[componentStack.length - 1] : undefined;
-                    if (meta && (meta.componentId == null)) meta.componentId = compId;
-                }
-            } else if (Array.isArray(value)) {
-                const flat = value.flat(Infinity);
-                let ref: Node | null = marker.nextSibling;
-                for (const v of flat) {
-                    if (v == null || v === false || v === true) continue;
-                    if (v instanceof Node) {
-                        parent.insertBefore(v, ref);
-                        nodes.push(v);
-                        if (v.nodeType === 1) {
-                            const el = v as Element;
-                            const meta = elementRegistry.get(el);
-                            const compId = componentStack.length ? componentStack[componentStack.length - 1] : undefined;
-                            if (meta && (meta.componentId == null)) meta.componentId = compId;
-                        }
-                    } else {
-                        const text = document.createTextNode(String(v));
-                        parent.insertBefore(text, ref);
-                        nodes.push(text);
-                    }
-                }
-            }
-
-            // mark updated elements
+            // Mark updated
             for (const n of nodes) {
-                if (n.nodeType === 1) {
-                    markUpdated(n as Element);
-                }
+                if (n.nodeType === 1) markUpdated(n as Element);
             }
         });
 
-        return marker;
+        return startMarker;
     }
 
     return null;
@@ -416,18 +460,10 @@ export function Show<T>(props: {
     fallback?: JSX.Element;
     children: JSX.Element | ((item: T) => JSX.Element);
 }): JSX.Element {
-    const getWhen = typeof props.when === 'function'
-        ? props.when as () => T
-        : () => props.when as T;
-
+    const getWhen = typeof props.when === 'function' ? (props.when as () => T) : () => props.when as T;
     return (() => {
         const val = getWhen();
-        if (val) {
-            return typeof props.children === 'function'
-                ? (props.children as (item: T) => JSX.Element)(val)
-                : props.children;
-        }
-        return props.fallback ?? null;
+        return val ? (typeof props.children === 'function' ? (props.children as (item: T) => JSX.Element)(val) : props.children) : (props.fallback ?? null);
     }) as unknown as JSX.Element;
 }
 
@@ -436,14 +472,45 @@ export function For<T>(props: {
     fallback?: JSX.Element;
     children: (item: T, index: () => number) => JSX.Element;
 }): JSX.Element {
-    const getEach = typeof props.each === 'function'
-        ? props.each as () => T[]
-        : () => props.each as T[];
+    const getEach = typeof props.each === 'function' ? (props.each as () => T[]) : () => props.each as T[];
+    const cache = new Map<any, { node: Node; setIndex: (i: number) => void }>();
+
+    onCleanup(() => {
+        for (const entry of cache.values()) {
+            if (entry.node instanceof Element) {
+                const meta = elementRegistry.get(entry.node);
+                if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(entry.node); }
+            }
+        }
+        cache.clear();
+    });
 
     return (() => {
-        const items = getEach() || [];
-        if (items.length === 0) return props.fallback ?? null;
-        return items.map((item, i) => props.children(item, () => i));
+        const currentItems = getEach() || [];
+        if (currentItems.length === 0) return props.fallback ?? null;
+
+        const nextKeys = new Set();
+        const result = currentItems.map((item, i) => {
+            const key = (item && typeof item === 'object') ? ((item as any).id ?? (item as any).key ?? item) : item;
+            nextKeys.add(key);
+            let entry = cache.get(key);
+            if (!entry) {
+                const [index, setIndex] = createSignal(i);
+                const node = untrack(() => props.children(item, index));
+                (node as any)._key = key;
+                entry = { node, setIndex };
+                cache.set(key, entry);
+            } else {
+                entry.setIndex(i);
+            }
+            return entry.node;
+        });
+
+        for (const key of cache.keys()) {
+            if (!nextKeys.has(key)) cache.delete(key);
+        }
+
+        return result;
     }) as unknown as JSX.Element;
 }
 
@@ -454,9 +521,7 @@ export function Switch(props: {
     return (() => {
         const children = Array.isArray(props.children) ? props.children : [props.children];
         for (const child of children) {
-            if (child && (child as any).__when?.()) {
-                return child;
-            }
+            if (child && (child as any).__when?.()) return child;
         }
         return props.fallback ?? null;
     }) as unknown as JSX.Element;
@@ -466,21 +531,12 @@ export function Match<T>(props: {
     when: T | (() => T);
     children: JSX.Element | ((item: T) => JSX.Element);
 }): JSX.Element {
-    const getWhen = typeof props.when === 'function'
-        ? props.when as () => T
-        : () => props.when as T;
-
+    const getWhen = typeof props.when === 'function' ? (props.when as () => T) : () => props.when as T;
     const result = typeof props.children === 'function'
-        ? () => {
-            const val = getWhen();
-            return val ? (props.children as (item: T) => JSX.Element)(val) : null;
-        }
+        ? () => { const val = getWhen(); return val ? (props.children as (item: T) => JSX.Element)(val) : null; }
         : props.children;
 
-    if (typeof result === 'object' && result) {
-        (result as any).__when = getWhen;
-    }
-
+    if (result && typeof result === 'object') (result as any).__when = getWhen;
     return result as JSX.Element;
 }
 
@@ -677,17 +733,37 @@ export function Suspense(props: {
 // Safe HTML Rendering
 // ============================================================================
 
-// Inline sanitization for Html component (avoids circular dependency)
-const HTML_DANGEROUS_TAGS = /(<script|<iframe|<object|<embed|<form|<input|<meta|<link|<style)[^>]*>.*?<\/\1>|(<script|<iframe|<object|<embed|<form|<input|<meta|<link|<style)[^>]*\/?>/gi;
-const HTML_DANGEROUS_ATTRS = /\s(on\w+|formaction|xlink:href)\s*=\s*["'][^"']*["']/gi;
-const HTML_DANGEROUS_PROTOCOLS = /\s(href|src|action)\s*=\s*["']?\s*javascript:[^"'\s>]*/gi;
+const DANGEROUS_TAGS_SET = new Set(['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base']);
+const DANGEROUS_ATTRS_SET = new Set(['formaction', 'xlink:href']);
 
 function inlineSanitizeHTML(html: string): string {
-    if (!html) return '';
-    return html
-        .replace(HTML_DANGEROUS_TAGS, '')
-        .replace(HTML_DANGEROUS_ATTRS, '')
-        .replace(HTML_DANGEROUS_PROTOCOLS, '');
+    if (!html || typeof DOMParser === 'undefined') return '';
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+
+    function clean(node: Node) {
+        if (node.nodeType === 1) {
+            const el = node as Element;
+            const tag = el.tagName.toLowerCase();
+            if (DANGEROUS_TAGS_SET.has(tag)) {
+                el.remove();
+                return;
+            }
+            const attrs = el.attributes;
+            for (let i = attrs.length - 1; i >= 0; i--) {
+                const attr = attrs[i];
+                const name = attr.name.toLowerCase();
+                const val = attr.value.toLowerCase();
+                if (name.startsWith('on') || DANGEROUS_ATTRS_SET.has(name) || val.includes('javascript:')) {
+                    el.removeAttribute(attr.name);
+                }
+            }
+        }
+        node.childNodes.forEach(clean);
+    }
+
+    clean(doc.body);
+    return doc.body.innerHTML;
 }
 
 /**
