@@ -1,5 +1,5 @@
 import { createTransition, type FC } from '@/core/velocity';
-import { appStore, counter, theme, accent, addActivity } from '@/app/stores/app';
+import { appStore, counter, theme, addActivity } from '@/app/stores/app';
 
 export const HomePage: FC = () => {
     const [themePending, startThemeTransition] = createTransition();
@@ -13,7 +13,7 @@ export const HomePage: FC = () => {
 
             <div class="space-y-6">
                 <div class="flex flex-wrap gap-3">
-                    <button 
+                    <button
                         class="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white px-4 py-2 rounded-md font-medium transition-colors"
                         onClick={() => {
                             appStore.patch(prev => ({ counter: prev.counter + 1 }));
@@ -22,7 +22,7 @@ export const HomePage: FC = () => {
                     >
                         Increment ({counter})
                     </button>
-                    <button 
+                    <button
                         class="bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-900 dark:text-white px-4 py-2 rounded-md font-medium transition-colors"
                         onClick={() => {
                             appStore.patch(prev => ({ counter: Math.max(0, prev.counter - 1) }));
@@ -43,23 +43,8 @@ export const HomePage: FC = () => {
                     >
                         Toggle Theme ({theme})
                     </button>
-                    <div class="flex items-center gap-2">
-                        <label class="text-sm font-medium text-gray-700 dark:text-gray-300">Accent:</label>
-                        <input
-                            class="w-12 h-8 rounded border border-gray-300 dark:border-gray-600 cursor-pointer"
-                            type="color"
-                            value={accent}
-                            onChange={(event: any) => {
-                                const value = event.target.value;
-                                startThemeTransition(() => {
-                                    appStore.update('preferences.accent', value);
-                                    addActivity('Accent updated');
-                                });
-                            }}
-                        />
-                    </div>
                 </div>
-                
+
                 <div class="text-sm text-gray-500 dark:text-gray-400">
                     Palette status: {() => themePending() ? 'Applying theme…' : 'Synced'}
                 </div>
