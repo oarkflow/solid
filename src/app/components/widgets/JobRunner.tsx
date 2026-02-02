@@ -35,30 +35,46 @@ export const JobRunner: FC = () => {
     };
 
     return (
-        <section class="card">
-            <h2>Job Runner</h2>
-            <p class="muted">Error boundaries capture failed background work safely.</p>
-            <div class="row gap">
-                <button class="button small" onClick={runJob} disabled={() => jobPending() || mode() === 'running'}>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="mb-4">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Job Runner</h3>
+                <p class="text-sm text-gray-600 dark:text-gray-400">Error boundaries capture failed background work safely.</p>
+            </div>
+            <div class="flex flex-wrap gap-2 mb-4">
+                <button 
+                    class="bg-green-600 hover:bg-green-700 disabled:bg-gray-400 dark:bg-green-500 dark:hover:bg-green-600 text-white px-3 py-1 rounded text-sm font-medium transition-colors disabled:cursor-not-allowed" 
+                    onClick={runJob} 
+                    disabled={() => jobPending() || mode() === 'running'}
+                >
                     {() => jobPending() ? 'Scheduling…' : 'Run Job'}
                 </button>
-                <button class="button ghost small" onClick={triggerFailure}>Trigger Failure</button>
-                <button class="button ghost small" onClick={resetJob}>Reset</button>
+                <button 
+                    class="bg-red-600 hover:bg-red-700 dark:bg-red-500 dark:hover:bg-red-600 text-white px-3 py-1 rounded text-sm font-medium transition-colors" 
+                    onClick={triggerFailure}
+                >
+                    Trigger Failure
+                </button>
+                <button 
+                    class="bg-gray-600 hover:bg-gray-700 dark:bg-gray-500 dark:hover:bg-gray-400 text-white px-3 py-1 rounded text-sm font-medium transition-colors" 
+                    onClick={resetJob}
+                >
+                    Reset
+                </button>
             </div>
-            <div class="list">
+            <div class="p-3 bg-gray-50 dark:bg-gray-700 rounded">
                 {() => error()
                     ? (
-                        <div class="muted">
+                        <div class="text-sm text-red-600 dark:text-red-400">
                             <strong>Last error:</strong> {error()?.message}
                         </div>
                     )
                     : (
-                        <div class="muted">
+                        <div class="text-sm text-gray-700 dark:text-gray-300">
                             <strong>Status:</strong> {mode() === 'running' ? 'Executing secure workflow…' : 'Idle'}
                         </div>
                     )
                 }
             </div>
-        </section>
+        </div>
     );
 };

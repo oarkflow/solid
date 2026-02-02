@@ -1,261 +1,156 @@
-* {
+/* Normalize CSS */
+*,
+*::before,
+*::after {
     box-sizing: border-box;
 }
 
-body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    margin: 0;
-    padding: 0;
-    line-height: 1.6;
-    color: #333;
-}
-
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-}
-
-button {
-    background: #007bff;
-    color: white;
-    border: none;
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-}
-
-button:hover {
-    background: #0056b3;
-}
-
-input, select, textarea {
-    border: 1px solid #ddd;
-    border-radius: 4px;
-    font-size: 14px;
-}
-
-a {
-    color: #007bff;
-    text-decoration: none;
-}
-
-a:hover {
-    text-decoration: underline;
-}
-
-
 * {
-    box-sizing: border-box;
     margin: 0;
-    padding: 0;
-    font-family: 'Inter', system-ui, -apple-system, sans-serif;
 }
 
-:root {
-    --bg: #f7f8fb;
-    --card: #ffffff;
-    --text: #0f172a;
-    --muted: #64748b;
-    --border: #e2e8f0;
-    --accent: #4f46e5;
-}
-
-[data-theme='dark'] {
-    --bg: #0b1120;
-    --card: #111827;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --border: #1f2937;
-    --accent: #38bdf8;
+html,
+body {
+    height: 100%;
 }
 
 body {
-    background: var(--bg);
-    color: var(--text);
-}
-
-.app {
-    min-height: 100vh;
-    background: var(--bg);
-    color: var(--text);
-}
-
-.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 20px 32px;
-    border-bottom: 1px solid var(--border);
-    background: var(--card);
-    position: sticky;
-    top: 0;
-    z-index: 10;
-}
-
-.brand {
-    font-weight: 700;
-    font-size: 20px;
-}
-
-.nav {
-    display: flex;
-    gap: 12px;
-}
-
-.nav-link {
-    text-decoration: none;
-    color: var(--muted);
-    font-weight: 500;
-    padding: 6px 10px;
-    border-radius: 999px;
-}
-
-.nav-link.active {
-    color: var(--text);
-    background: color-mix(in srgb, var(--accent) 15%, transparent);
-}
-
-.session {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-}
-
-.pill {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
-    color: var(--text);
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 13px;
-}
-
-.grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 24px;
-    padding: 28px 32px;
-}
-
-.stack {
-    display: flex;
-    flex-direction: column;
-    gap: 20px;
-}
-
-.card {
-    background: var(--card);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 20px;
-    box-shadow: 0 12px 30px rgba(15, 23, 42, 0.06);
-}
-
-.card h2 {
-    margin-bottom: 8px;
-    font-size: 18px;
-}
-
-.muted {
-    color: var(--muted);
-    font-size: 14px;
     line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
 }
 
-.row {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
+img,
+picture,
+video,
+canvas,
+svg {
+    display: block;
+    max-width: 100%;
 }
 
-.gap {
-    gap: 12px;
-    margin-top: 16px;
+input,
+button,
+textarea,
+select {
+    font: inherit;
 }
 
-.button {
-    background: var(--accent);
-    color: #fff;
-    border: none;
-    padding: 10px 16px;
-    border-radius: 10px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+p,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    overflow-wrap: break-word;
 }
 
-.button:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 16px rgba(79, 70, 229, 0.2);
+/* CSS Variables Design System */
+:root {
+    --background: 0 0% 100%;
+    --foreground: 217 100% 15%;
+    --card: 0 0% 100%;
+    --card-foreground: 217 100% 15%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 217 100% 15%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 84% 5%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+    --accent: 210 40% 96%;
+    --accent-foreground: 222 84% 5%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --success: 142 72% 45%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --border: 214 32% 91%;
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;
+    --radius: 0.5rem;
+    
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
 }
 
-.button.ghost {
-    background: transparent;
-    color: var(--text);
-    border: 1px solid var(--border);
+.dark {
+    --background: 222 84% 5%;
+    --foreground: 210 40% 98%;
+    --card: 222 84% 5%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 84% 5%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 222 84% 5%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 63% 31%;
+    --destructive-foreground: 210 40% 98%;
+    --success: 142 72% 45%;
+    --success-foreground: 0 0% 98%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 98%;
+    --info: 199 89% 48%;
+    --info-foreground: 0 0% 100%;
+    --border: 217 33% 17%;
+    --input: 217 33% 17%;
+    --ring: 217 91% 60%;
+    
+    /* Shadows for dark mode */
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.4), 0 2px 4px -2px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4);
+    --shadow-xl: 0 20px 25px -5px rgb(0 0 0 / 0.6), 0 8px 10px -6px rgb(0 0 0 / 0.5);
 }
 
-.button.small {
-    padding: 6px 12px;
-    font-size: 13px;
+/* Base styles */
+html {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-.input,
-.color {
-    border-radius: 10px;
-    border: 1px solid var(--border);
-    background: transparent;
-    color: var(--text);
-    padding: 10px 12px;
+body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-feature-settings: "rlig" 1, "calt" 1;
 }
 
-.color {
-    width: 48px;
-    height: 42px;
-    padding: 0;
-}
-
-.list {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-top: 12px;
-}
-
-.loading-card {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 140px;
-}
-
-.loading-row {
-    margin-top: 0;
-}
-
-.loading-spinner {
-    width: 28px;
-    height: 28px;
-    border-radius: 999px;
-    border: 3px solid color-mix(in srgb, var(--accent) 20%, transparent);
-    border-top-color: var(--accent);
-    animation: spin 0.9s linear infinite;
-}
-
+/* Tailwind CSS Animations */
 @keyframes spin {
-    to {
-        transform: rotate(360deg);
+    to { transform: rotate(360deg); }
+}
+
+@keyframes ping {
+    75%, 100% {
+        transform: scale(2);
+        opacity: 0;
     }
 }
 
-@media (max-width: 1024px) {
-    .grid {
-        grid-template-columns: 1fr;
+@keyframes pulse {
+    50% {
+        opacity: .5;
     }
+}
 
-    .topbar {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 16px;
+@keyframes bounce {
+    0%, 100% {
+        transform: translateY(-25%);
+        animation-timing-function: cubic-bezier(0.8,0,1,1);
+    }
+    50% {
+        transform: none;
+        animation-timing-function: cubic-bezier(0,0,0.2,1);
     }
 }

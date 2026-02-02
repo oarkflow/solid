@@ -3,6 +3,28 @@ import { createElement } from './jsx';
 import type { FC, Props } from './jsx';
 
 // ============================================================================
+// Global Router Instance
+// ============================================================================
+
+let globalLink: any = null;
+let globalUseRouter: any = null;
+
+export function _setGlobalRouter(Link: any, useRouter: any) {
+    globalLink = Link;
+    globalUseRouter = useRouter;
+}
+
+export const Link: any = (props: any) => {
+    if (!globalLink) throw new Error('Router not initialized. Call createRouter first.');
+    return globalLink(props);
+};
+
+export const useRouter = (): any => {
+    if (!globalUseRouter) throw new Error('Router not initialized. Call createRouter first.');
+    return globalUseRouter();
+};
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -575,7 +597,7 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
     /**
      * Link component - declarative navigation
      */
-    const Link: FC<Props & {
+    const LocalLink: FC<Props & {
         to: string;
         class?: string;
         activeClass?: string;
@@ -623,7 +645,7 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
     /**
      * Hook to access router API
      */
-    const useRouter = (): RouterApi => ({
+    const localUseRouter = (): RouterApi => ({
         path,
         params,
         query,
@@ -633,5 +655,8 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         forward,
     });
 
-    return { Router, Link, useRouter, Outlet };
+    // Set global exports
+    _setGlobalRouter(LocalLink, localUseRouter);
+    
+    return { Router, Link: LocalLink, useRouter: localUseRouter, Outlet };
 }

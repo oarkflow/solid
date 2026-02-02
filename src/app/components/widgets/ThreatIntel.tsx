@@ -51,28 +51,34 @@ export const ThreatIntel: FC = () => {
     const entries = () => intel().data ?? [];
 
     return (
-        <section class="card">
-            <div class="row gap">
-                <h2>Threat Intel</h2>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 p-4">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Threat Intel</h3>
                 <button
-                    class="button small"
+                    class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 dark:bg-blue-500 dark:hover:bg-blue-600 text-white px-3 py-1 rounded text-sm font-medium transition-colors disabled:cursor-not-allowed"
                     disabled={pending}
                     onClick={() => setRefreshIndex(v => v + 1)}
                 >
                     {() => pending() ? 'Syncing…' : 'Refresh'}
                 </button>
             </div>
-            <div class="list">
+            <div class="space-y-2">
                 {() => pending()
-                    ? <div class="muted">Syncing intelligence feed…</div>
+                    ? <div class="text-sm text-gray-500 dark:text-gray-400 italic">Syncing intelligence feed…</div>
                     : entries().map(item => (
-                        <div class="muted row gap" data-level={item.severity}>
-                            <span class="pill" data-variant={item.severity}>{severityLabels[item.severity]}</span>
-                            <span>{item.entry}</span>
+                        <div class="flex items-center gap-3 p-2 bg-gray-50 dark:bg-gray-700 rounded">
+                            <span class={`px-2 py-1 rounded-full text-xs font-medium ${
+                                item.severity === 'high' ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400' :
+                                item.severity === 'medium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400' :
+                                'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400'
+                            }`}>
+                                {severityLabels[item.severity]}
+                            </span>
+                            <span class="text-sm text-gray-700 dark:text-gray-300">{item.entry}</span>
                         </div>
                     ))
                 }
             </div>
-        </section>
+        </div>
     );
 };

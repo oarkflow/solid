@@ -118,7 +118,7 @@ export type {
 // Router
 // ============================================================================
 
-export { createRouter } from './router';
+export { createRouter, Link, useRouter } from './router';
 export type {
     Route,
     RouterApi,

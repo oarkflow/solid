@@ -1,6 +1,10 @@
-import { App } from "./App";
+import { installTailwind } from '@/core/tailwindcss';
+// Install Tailwind CSS runtime
+installTailwind();
+import './index.css';
+
 import { render } from "@/core/velocity";
-import "@/core/tailwindcss";
+import { App } from "./App";
 
 
 // Auto-install devtools in dev mode

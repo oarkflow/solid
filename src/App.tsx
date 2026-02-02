@@ -1,6 +1,5 @@
 import type { FC } from '@/core/velocity';
-import { createRouter, lazy } from '@/core/velocity';
-import './index.css';
+import { createRouter, lazy, useRouter } from '@/core/velocity';
 
 const HomePage = lazy(() => import('@/app/pages/Home').then(m => ({ default: m.HomePage })));
 const LoginPage = lazy(() => import('@/app/pages/Login').then(m => ({ default: m.LoginPage })));
@@ -13,10 +12,9 @@ const NotFoundPage = lazy(() => import('@/app/pages/NotFound').then(m => ({ defa
 import { Header } from '@/app/components/layout/Header';
 import { Sidebar } from '@/app/components/layout/Sidebar';
 import { Loading } from '@/app/components/layout/Loading';
-import { TailwindDemo } from '@/app/components/TailwindDemo';
 
 import { isAuthenticated } from '@/app/stores/auth';
-import { theme, accent, addActivity } from '@/app/stores/app';
+import { theme, addActivity } from '@/app/stores/app';
 
 import { registerRouterApi } from '@/app/router/navigation';
 import { auditTrailMiddleware, queryShieldMiddleware, profileValidationMiddleware } from '@/app/router/middlewares';
@@ -123,18 +121,32 @@ const routerOptions = {
     onBlocked: () => addActivity('Blocked unsafe navigation'),
 };
 
-const { Router, Link, useRouter } = createRouter(routes, routerOptions);
+const { Router } = createRouter(routes, routerOptions);
 registerRouterApi(useRouter());
 
-export const App: FC = () => (
-    <div class="app" data-theme={theme} style={() => ({ '--accent': accent() } as any)}>
-        <Header Link={Link} />
-        <main class="grid">
-            <div class="stack">
-                <Router fallback={<Loading />} />
-                <TailwindDemo />
-            </div>
-            <Sidebar />
-        </main>
-    </div>
-);
+import { createEffect } from '@/core/velocity';
+
+export const App: FC = () => {
+    // Apply theme to html element reactively
+    createEffect(() => {
+        if (typeof document !== 'undefined') {
+            document.documentElement.className = theme();
+        }
+    });
+
+    return (
+        <div class="min-h-screen bg-gray-50 dark:bg-gray-900">
+            <Header />
+            <main class="max-w-7xl mx-auto px-6 py-8">
+                <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+                    <div class="lg:col-span-3">
+                        <Router fallback={<Loading />} />
+                    </div>
+                    <div class="lg:col-span-1">
+                        <Sidebar />
+                    </div>
+                </div>
+            </main>
+        </div>
+    );
+};

@@ -5,7 +5,7 @@ import { JobRunner } from '@/app/components/widgets/JobRunner';
 import { SessionStatus } from '@/app/components/widgets/SessionStatus';
 
 export const Sidebar: FC = () => (
-    <aside class="stack">
+    <aside class="space-y-6">
         <ActivityFeed />
         <ThreatIntel />
         <JobRunner />
