@@ -43,6 +43,13 @@ export {
     // Context API
     createContext,
     useContext,
+
+    // Devtools
+    enableDevtools,
+    disableDevtools,
+    getDevSnapshot,
+    // Component deps
+    getComponentDeps,
 } from './reactivity';
 
 // ============================================================================
@@ -60,6 +67,15 @@ export {
     Switch,
     Match,
     Portal,
+
+    // DOM inspection
+    getDOMSnapshot,
+    getElementById,
+    // Component inspection
+    getComponentSnapshot,
+    getComponentsTree,
+    getComponentInstances,
+    getElementsForComponent,
 } from './jsx';
 
 export type { FC, Props } from './jsx';
@@ -98,3 +114,6 @@ import { createElement as _createElement } from './jsx';
 export const jsx = _createElement;
 export const jsxs = _createElement;
 export const jsxDEV = _createElement;
+
+// Devtools
+export { installDevtools, uninstallDevtools, attachSnapshotLogger } from './devtools';

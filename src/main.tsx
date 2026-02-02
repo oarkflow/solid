@@ -6,7 +6,8 @@ import {
     createMemo,
     createStore,
     createActions,
-    createRouter
+    createRouter,
+    installDevtools
 } from './solid';
 import './index.css';
 
@@ -280,5 +281,11 @@ const App: FC = () => (
         </main>
     </div>
 );
+
+// Auto-install devtools in dev mode
+const __isDev = ((typeof import.meta !== 'undefined' && (import.meta as any).env?.DEV) || (globalThis as any).process?.env?.NODE_ENV !== 'production');
+if (__isDev) {
+    installDevtools({ autoOpen: true, autoEnableInDev: true, highlightUpdates: true, autoBindSelector: '.button' });
+}
 
 render(<App />, document.getElementById('root')!);

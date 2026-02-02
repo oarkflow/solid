@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, untrack } from './reactivity';
+import { createEffect, onCleanup, untrack, getDevSnapshot } from './reactivity';
 
 // ============================================================================
 // Types
@@ -24,6 +24,87 @@ function sanitizeUrl(url: string): string {
 // ============================================================================
 // DOM Helpers
 // ============================================================================
+
+// Dev registry for DOM nodes (use strong map for dev inspection)
+let elementIdCounter = 0;
+const elementRegistry = new Map<Element, { id: number; tag: string; isSvg: boolean; events: Set<string>; propsSet: number; updates: number; lastUpdated?: number; createdAt: number; componentId?: number }>();
+const elementIdMap = new Map<number, Element>();
+
+// Component instance registry
+let componentInstanceCounter = 0;
+const componentInstances = new Map<number, { id: number; name: string; func?: Function; renders: number; lastRender?: number; parentId?: number | null; children: Set<number> }>();
+const componentStack: number[] = [];
+
+function markUpdated(el: Element) {
+    try {
+        const meta = elementRegistry.get(el);
+        if (!meta) return;
+        meta.updates = (meta.updates || 0) + 1;
+        meta.lastUpdated = Date.now();
+        // Visual highlight when devtools enabled
+        try {
+            if (getDevSnapshot().enabled) {
+                el.classList.add('solid-dev-updated');
+                setTimeout(() => el.classList.remove('solid-dev-updated'), 1200);
+            }
+        } catch { /* ignore */ }
+    } catch (e) {
+        // silent
+    }
+}
+
+// Component helpers
+export function getComponentSnapshot() {
+    const arr: Array<{ id: number; name: string; renders: number; lastRender?: number; parentId?: number | null; children: number[] }> = [];
+    for (const meta of componentInstances.values()) {
+        arr.push({ id: meta.id, name: meta.name, renders: meta.renders, lastRender: meta.lastRender, parentId: meta.parentId ?? null, children: [...meta.children] });
+    }
+    return arr;
+}
+
+export function getComponentsTree() {
+    // Build nested tree nodes
+    const byId = new Map<number, any>();
+    for (const meta of componentInstances.values()) {
+        byId.set(meta.id, { ...meta, children: [] as any[] });
+    }
+    const roots: any[] = [];
+    for (const meta of componentInstances.values()) {
+        const node = byId.get(meta.id);
+        if (meta.parentId == null) {
+            roots.push(node);
+        } else {
+            const parent = byId.get(meta.parentId);
+            if (parent) parent.children.push(node);
+            else roots.push(node);
+        }
+    }
+    return roots;
+}
+
+export function getComponentInstances() {
+    return [...componentInstances.values()];
+}
+
+export function getDOMSnapshot() {
+    const snapshot: Array<{ id: number; tag: string; isSvg: boolean; events: string[]; propsSet: number; updates: number; lastUpdated?: number; createdAt: number; componentId?: number }> = [];
+    for (const [el, meta] of elementRegistry.entries()) {
+        snapshot.push({ id: meta.id, tag: meta.tag, isSvg: meta.isSvg, events: [...meta.events], propsSet: meta.propsSet, updates: meta.updates, lastUpdated: meta.lastUpdated, createdAt: meta.createdAt, componentId: meta.componentId });
+    }
+    return snapshot;
+}
+
+export function getElementById(id: number): Element | undefined {
+    return elementIdMap.get(id);
+}
+
+export function getElementsForComponent(componentId: number) {
+    const ids: number[] = [];
+    for (const [el, meta] of elementRegistry.entries()) {
+        if (meta.componentId === componentId) ids.push(meta.id);
+    }
+    return ids;
+}
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const SVG_TAGS = new Set([
@@ -117,8 +198,16 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
         let nodes: Node[] = [];
 
         createEffect(() => {
-            // Remove old nodes
+            // Remove old nodes (also cleanup registry entries)
             for (const n of nodes) {
+                if (n.nodeType === 1) {
+                    const el = n as Element;
+                    const meta = elementRegistry.get(el);
+                    if (meta) {
+                        elementIdMap.delete(meta.id);
+                        elementRegistry.delete(el);
+                    }
+                }
                 n.parentNode?.removeChild(n);
             }
             nodes = [];
@@ -152,6 +241,13 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
                     }
                 }
             }
+
+            // mark parent updated
+            if (parent instanceof Element) {
+                const pm = elementRegistry.get(parent);
+                if (pm) { pm.updates++; pm.lastUpdated = Date.now(); }
+                markUpdated(parent);
+            }
         });
 
         return marker;
@@ -177,11 +273,41 @@ export function createElement(
         }));
     }
 
+    // If this is a function component, create an instance entry & manage stack
+    if (typeof tag === 'function') {
+        const instanceId = ++componentInstanceCounter;
+        const name = (tag as any).name || 'Anonymous';
+        const parentId = componentStack.length ? componentStack[componentStack.length - 1] : null;
+        const meta: any = { id: instanceId, name, func: tag, renders: 0, lastRender: undefined, parentId, children: new Set<number>() };
+        componentInstances.set(instanceId, meta);
+        if (parentId != null) {
+            const pm = componentInstances.get(parentId) as any;
+            if (pm) pm.children.add(instanceId);
+        }
+
+        // push instance, run component, and pop
+        componentStack.push(instanceId);
+        try {
+            meta.renders++;
+            meta.lastRender = Date.now();
+            const res = untrack(() => (tag as any)({ ...(props ?? {}), children: children.length === 1 ? children[0] : children.length ? children : props?.children }));
+            return res as JSX.Element;
+        } finally {
+            componentStack.pop();
+        }
+    }
+
     // Create element
     const isSvg = SVG_TAGS.has(tag);
     const el = isSvg
         ? document.createElementNS(SVG_NS, tag)
         : document.createElement(tag);
+
+    // Register for dev inspection
+    const id = ++elementIdCounter;
+    const compId = componentStack.length ? componentStack[componentStack.length - 1] : undefined;
+    elementRegistry.set(el, { id, tag, isSvg, events: new Set(), propsSet: 0, updates: 0, lastUpdated: undefined, createdAt: Date.now(), componentId: compId });
+    elementIdMap.set(id, el);
 
     // Set props
     if (props) {
@@ -192,6 +318,14 @@ export function createElement(
             if (key.startsWith('on') && key[2] >= 'A' && key[2] <= 'Z') {
                 const event = key.slice(2).toLowerCase();
                 el.addEventListener(event, value);
+                // dev: register event
+                const meta = elementRegistry.get(el);
+                if (meta) {
+                    meta.events.add(event);
+                    meta.updates++;
+                    meta.lastUpdated = Date.now();
+                    markUpdated(el);
+                }
                 continue;
             }
 
@@ -213,6 +347,13 @@ export function createElement(
             if (typeof value === 'function' && key !== 'ref') {
                 createEffect(() => {
                     setAttr(el, key, value(), isSvg);
+                    const meta = elementRegistry.get(el);
+                    if (meta) {
+                        meta.propsSet++;
+                        meta.updates++;
+                        meta.lastUpdated = Date.now();
+                        markUpdated(el);
+                    }
                 });
                 continue;
             }

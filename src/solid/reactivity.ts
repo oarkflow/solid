@@ -22,6 +22,78 @@ let batchDepth = 0;
 let pendingEffects: Set<Effect> = new Set();
 
 // ============================================================================
+// Devtools instrumentation
+// ============================================================================
+
+type DevEffectMeta = { id: number; runs: number; lastRun?: number };
+type DevSignalMeta = { id: number; reads: number; writes: number };
+
+const devState = {
+    enabled: false,
+    effectCounter: 0,
+    signalCounter: 0,
+    effects: new WeakMap<Effect, DevEffectMeta>(),
+    signals: new WeakMap<Set<Effect>, DevSignalMeta>(),
+};
+
+// Strong registries for snapshotting (only populated when devtools enabled)
+const devEffectsRegistry = new Map<Effect, DevEffectMeta>();
+const devSignalsRegistry = new Map<Set<Effect>, DevSignalMeta>();
+
+// Component -> signals/effects mapping
+const devComponentSignals = new Map<number, Set<number>>();
+const devComponentEffects = new Map<number, Set<number>>();
+
+
+export function enableDevtools() {
+    devState.enabled = true;
+}
+
+export function disableDevtools() {
+    devState.enabled = false;
+}
+
+export function getDevSnapshot() {
+    const effects: Array<{ id: number; runs: number; lastRun?: number }> = [];
+    for (const meta of devEffectsRegistry.values()) {
+        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun });
+    }
+
+    const signals: Array<{ id: number; reads: number; writes: number }> = [];
+    for (const meta of devSignalsRegistry.values()) {
+        signals.push({ id: meta.id, reads: meta.reads, writes: meta.writes });
+    }
+
+    // Component mappings (signals/effects)
+    const components: Array<{ id: number; signals: number[]; effects: number[] }> = [];
+    const compIds = new Set<number>([...devComponentSignals.keys(), ...devComponentEffects.keys()]);
+    for (const compId of compIds) {
+        components.push({ id: compId, signals: [...(devComponentSignals.get(compId) ?? [])], effects: [...(devComponentEffects.get(compId) ?? [])] });
+    }
+
+    return {
+        enabled: devState.enabled,
+        effectCounter: devState.effectCounter,
+        signalCounter: devState.signalCounter,
+        pendingEffects: pendingEffects.size,
+        batchDepth,
+        effects,
+        signals,
+        components,
+    };
+}
+
+/**
+ * Return lists of signal/effect ids associated with a component
+ */
+export function getComponentDeps(componentId: number) {
+    return {
+        signals: [...(devComponentSignals.get(componentId) ?? [])],
+        effects: [...(devComponentEffects.get(componentId) ?? [])],
+    };
+}
+
+// ============================================================================
 // Core Primitives
 // ============================================================================
 
@@ -35,6 +107,11 @@ export function createSignal<T>(
     let value = initialValue;
     const subscribers = new Set<Effect>();
 
+    // Register signal metadata for devtools
+    const signalMeta: DevSignalMeta = { id: ++devState.signalCounter, reads: 0, writes: 0 };
+    devState.signals.set(subscribers, signalMeta);
+    devSignalsRegistry.set(subscribers, signalMeta);
+
     const equals = options?.equals === false
         ? () => false
         : options?.equals ?? Object.is;
@@ -44,6 +121,22 @@ export function createSignal<T>(
         if (currentEffect) {
             subscribers.add(currentEffect);
             currentEffect.dependencies.add(subscribers);
+        }
+        if (devState.enabled) {
+            const meta = devState.signals.get(subscribers);
+            if (meta) meta.reads++;
+
+            // If there is a current component executing, map component -> signal
+            const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+            if (compId != null && devSignalsRegistry.has(subscribers)) {
+                const sigMeta = devSignalsRegistry.get(subscribers)!;
+                let set = devComponentSignals.get(compId);
+                if (!set) {
+                    set = new Set();
+                    devComponentSignals.set(compId, set);
+                }
+                set.add(sigMeta.id);
+            }
         }
         return value;
     };
@@ -59,6 +152,11 @@ export function createSignal<T>(
         }
 
         value = newValue;
+
+        if (devState.enabled) {
+            const meta = devState.signals.get(subscribers);
+            if (meta) meta.writes++;
+        }
 
         // Notify all subscribers
         if (batchDepth > 0) {
@@ -82,6 +180,24 @@ export function createSignal<T>(
  * Run an effect, cleaning up first
  */
 function runEffect(effect: Effect) {
+    // Dev: record run
+    const devMeta = devState.effects.get(effect) || devEffectsRegistry.get(effect);
+    if (devMeta) {
+        devMeta.runs++;
+        devMeta.lastRun = Date.now();
+
+        // If a component is executing now, attribute this effect to it
+        const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+        if (compId != null) {
+            let set = devComponentEffects.get(compId);
+            if (!set) {
+                set = new Set();
+                devComponentEffects.set(compId, set);
+            }
+            set.add(devMeta.id);
+        }
+    }
+
     // Run cleanups
     for (const cleanup of effect.cleanups) {
         try { cleanup(); } catch (e) { console.error(e); }
@@ -113,6 +229,11 @@ export function createEffect(fn: () => void): void {
         dependencies: new Set(),
         cleanups: [],
     };
+
+    // Dev meta
+    const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0 };
+    devState.effects.set(effect, meta);
+    devEffectsRegistry.set(effect, meta);
 
     // Run immediately
     runEffect(effect);
