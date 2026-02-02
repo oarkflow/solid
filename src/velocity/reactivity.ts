@@ -15,9 +15,28 @@ type Effect = {
     execute: () => void;
     dependencies: Set<Set<Effect>>;
     cleanups: (() => void)[];
+    owner: Owner | null;
 };
 
+type Owner = {
+    parent: Owner | null;
+    cleanups: (() => void)[];
+    errorHandlers: Set<(error: Error) => void>;
+    effects: Set<Effect>;
+    suspense?: SuspenseBoundary;
+    transition?: TransitionTuple;
+};
+
+type SuspenseState = { pending: boolean; error: Error | null };
+type SuspenseBoundary = {
+    begin: () => void;
+    end: (error?: Error | null) => void;
+};
+
+type TransitionTuple = [() => boolean, (fn: () => void) => void];
+
 let currentEffect: Effect | null = null;
+let currentOwner: Owner | null = null;
 let batchDepth = 0;
 let pendingEffects: Set<Effect> = new Set();
 
@@ -25,7 +44,7 @@ let pendingEffects: Set<Effect> = new Set();
 // Devtools instrumentation
 // ============================================================================
 
-type DevEffectMeta = { id: number; runs: number; lastRun?: number };
+type DevEffectMeta = { id: number; runs: number; lastRun?: number; name?: string };
 type DevSignalMeta = { id: number; reads: number; writes: number; name?: string; getValue?: () => any };
 
 const devState = {
@@ -49,6 +68,65 @@ const devEffectSignals = new Map<number, Set<number>>();
 const devEffectOwner = new Map<number, number | undefined>();
 
 
+function createOwner(parent: Owner | null): Owner {
+    return {
+        parent,
+        cleanups: [],
+        errorHandlers: new Set(),
+        effects: new Set(),
+        suspense: parent?.suspense,
+        transition: undefined,
+    };
+}
+
+function stopEffect(effect: Effect) {
+    for (const cleanup of effect.cleanups) {
+        try { cleanup(); } catch (error) { console.error(error); }
+    }
+    effect.cleanups = [];
+    for (const deps of effect.dependencies) {
+        deps.delete(effect);
+    }
+    effect.dependencies.clear();
+}
+
+function disposeOwner(owner: Owner) {
+    owner.effects.forEach(stopEffect);
+    owner.effects.clear();
+    for (const cleanup of owner.cleanups.splice(0)) {
+        try { cleanup(); } catch (error) { console.error(error); }
+    }
+    owner.errorHandlers.clear();
+    owner.suspense = undefined;
+    owner.transition = undefined;
+}
+
+function normalizeError(error: unknown): Error {
+    if (error instanceof Error) return error;
+    if (typeof error === 'string') return new Error(error);
+    try {
+        return new Error(JSON.stringify(error));
+    } catch {
+        return new Error('Unknown error');
+    }
+}
+
+function handleError(error: unknown, owner: Owner | null) {
+    const err = normalizeError(error);
+    let cursor: Owner | null = owner;
+    while (cursor) {
+        if (cursor.errorHandlers.size) {
+            cursor.errorHandlers.forEach(handler => {
+                try { handler(err); } catch (handlerError) { console.error(handlerError); }
+            });
+            return;
+        }
+        cursor = cursor.parent;
+    }
+    throw err;
+}
+
+
 export function enableDevtools() {
     devState.enabled = true;
 }
@@ -58,9 +136,9 @@ export function disableDevtools() {
 }
 
 export function getDevSnapshot() {
-    const effects: Array<{ id: number; runs: number; lastRun?: number; signals?: number[]; owner?: number | undefined }> = [];
+    const effects: Array<{ id: number; runs: number; lastRun?: number; signals?: number[]; owner?: number | undefined; name?: string }> = [];
     for (const meta of devEffectsRegistry.values()) {
-        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun, signals: [...(devEffectSignals.get(meta.id) ?? [])], owner: devEffectOwner.get(meta.id) });
+        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun, signals: [...(devEffectSignals.get(meta.id) ?? [])], owner: devEffectOwner.get(meta.id), name: meta.name });
     }
 
     const signals: Array<{ id: number; name?: string; reads: number; writes: number; value?: any }> = [];
@@ -244,26 +322,40 @@ function runEffect(effect: Effect) {
 
     // Run the effect
     const prevEffect = currentEffect;
+    const prevOwner = currentOwner;
     currentEffect = effect;
+    currentOwner = effect.owner ?? prevOwner;
     try {
         effect.execute();
+    } catch (error) {
+        try {
+            handleError(error, effect.owner ?? prevOwner ?? null);
+        } catch (unhandled) {
+            throw unhandled;
+        }
     } finally {
         currentEffect = prevEffect;
+        currentOwner = prevOwner;
     }
 }
 
 /**
  * Creates a reactive effect
  */
-export function createEffect(fn: () => void): void {
+export function createEffect(fn: () => void, options?: { name?: string }): void {
     const effect: Effect = {
         execute: fn,
         dependencies: new Set(),
         cleanups: [],
+        owner: currentOwner,
     };
 
+    if (currentOwner) {
+        currentOwner.effects.add(effect);
+    }
+
     // Dev meta and ownership
-    const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0 };
+    const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0, name: options?.name ?? fn.name };
     devState.effects.set(effect, meta);
     devEffectsRegistry.set(effect, meta);
 
@@ -328,7 +420,20 @@ export function batch<T>(fn: () => T): T {
 export function onCleanup(fn: () => void): void {
     if (currentEffect) {
         currentEffect.cleanups.push(fn);
+    } else if (currentOwner) {
+        currentOwner.cleanups.push(fn);
     }
+}
+
+export function onError(handler: (error: Error) => void): () => void {
+    const owner = currentOwner;
+    if (!owner) {
+        throw new Error('onError must be used within a reactive owner');
+    }
+    owner.errorHandlers.add(handler);
+    const dispose = () => owner.errorHandlers.delete(handler);
+    onCleanup(dispose);
+    return dispose;
 }
 
 /**
@@ -389,6 +494,57 @@ export function on<S, U>(
     });
 
     return () => result;
+}
+
+// ============================================================================
+// Error Boundaries
+// ============================================================================
+
+export function createErrorBoundary(options?: { onError?: (error: Error) => void }) {
+    const owner = currentOwner;
+    if (!owner) {
+        throw new Error('createErrorBoundary must be used within a reactive owner');
+    }
+    const [error, setError] = createSignal<Error | null>(null, { equals: false });
+
+    const dispose = onError(err => {
+        setError(err);
+        options?.onError?.(err);
+    });
+
+    const runInsideOwner = <T>(fn: () => T) => {
+        if (owner) {
+            return runWithOwner(owner, fn);
+        }
+        return fn();
+    };
+
+    const reset = (cb?: () => void) => {
+        setError(null);
+        if (cb) {
+            runInsideOwner(cb);
+        }
+    };
+
+    const retry = (operation: () => Promise<any> | any) => {
+        reset();
+        return runInsideOwner(() => {
+            try {
+                const result = operation();
+                if (result && typeof (result as Promise<unknown>).then === 'function') {
+                    return (result as Promise<unknown>).catch(err => {
+                        handleError(err, owner ?? null);
+                        return Promise.reject(err);
+                    });
+                }
+                return result;
+            } catch (err) {
+                handleError(err, owner ?? null);
+            }
+        });
+    };
+
+    return [error, { reset, retry, dispose }] as const;
 }
 
 // ============================================================================
@@ -454,36 +610,169 @@ export function createThrottledSignal<T>(
     return [value, throttledSet];
 }
 
+function createTransitionTuple(owner: Owner | null): TransitionTuple {
+    const [pending, setPending] = createSignal(false);
+
+    const schedule = (fn: () => void) => {
+        if (typeof fn !== 'function') return;
+        const targetOwner = owner ?? currentOwner;
+        setPending(true);
+        queueMicrotask(() => {
+            try {
+                runWithOwner(targetOwner ?? null, () => {
+                    batch(() => {
+                        try {
+                            fn();
+                        } catch (error) {
+                            handleError(error, targetOwner ?? null);
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error(error);
+            } finally {
+                setPending(false);
+            }
+        });
+    };
+
+    return [pending, schedule];
+}
+
+function ensureOwnerTransition(owner: Owner | null): TransitionTuple {
+    if (!owner) {
+        return createTransitionTuple(null);
+    }
+    if (!owner.transition) {
+        owner.transition = createTransitionTuple(owner);
+    }
+    return owner.transition;
+}
+
+export function createTransition(): TransitionTuple {
+    return createTransitionTuple(null);
+}
+
+export function useTransition(): TransitionTuple {
+    return ensureOwnerTransition(currentOwner);
+}
+
+export function startTransition(fn: () => void): void {
+    const [, schedule] = ensureOwnerTransition(currentOwner);
+    schedule(fn);
+}
+
 // ============================================================================
 // Reactive Root
 // ============================================================================
 
 export function createRoot<T>(fn: (dispose: () => void) => T): T {
-    const effects: Effect[] = [];
-    const dispose = () => {
-        for (const effect of effects) {
-            for (const cleanup of effect.cleanups) {
-                try { cleanup(); } catch (e) { console.error(e); }
-            }
-            for (const deps of effect.dependencies) {
-                deps.delete(effect);
-            }
+    const parent = currentOwner;
+    const owner = createOwner(parent);
+    return runWithOwner(owner, () => {
+        try {
+            return fn(() => disposeOwner(owner));
+        } catch (error) {
+            handleError(error, owner);
+            throw error;
         }
-    };
-    return fn(dispose);
+    });
 }
 
-export function getOwner(): null {
-    return null;
+export function getOwner(): unknown {
+    return currentOwner;
 }
 
-export function runWithOwner<T>(_owner: null, fn: () => T): T {
-    return fn();
+export function runWithOwner<T>(owner: unknown, fn: () => T): T {
+    const prev = currentOwner;
+    currentOwner = owner as Owner | null;
+    try {
+        return fn();
+    } finally {
+        currentOwner = prev;
+    }
 }
 
 // ============================================================================
 // Resource (Async Data)
 // ============================================================================
+
+export function createSuspense(options?: { timeout?: number }) {
+    const owner = currentOwner;
+    if (!owner) {
+        throw new Error('createSuspense must be used within a reactive owner');
+    }
+    const [state, setState] = createSignal<SuspenseState>({ pending: false, error: null }, { equals: false });
+    let pendingCount = 0;
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    const previousBoundary = owner?.suspense;
+
+    const begin = () => {
+        pendingCount++;
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+        }
+        if (options?.timeout) {
+            timeoutId = setTimeout(() => {
+                setState(prev => prev.pending ? prev : { ...prev, pending: true });
+            }, options.timeout);
+        } else {
+            setState(prev => prev.pending ? prev : { ...prev, pending: true });
+        }
+    };
+
+    const end = (error?: Error | null) => {
+        pendingCount = Math.max(0, pendingCount - 1);
+        if (error) {
+            setState({ pending: false, error });
+            return;
+        }
+        if (pendingCount === 0) {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = null;
+            }
+            setState({ pending: false, error: null });
+        }
+    };
+
+    const track = <T>(operation: () => Promise<T> | T): Promise<T> => {
+        begin();
+        return Promise.resolve()
+            .then(operation)
+            .then(
+                value => {
+                    end();
+                    return value;
+                },
+                error => {
+                    const normalized = normalizeError(error);
+                    end(normalized);
+                    return Promise.reject(normalized);
+                }
+            );
+    };
+
+    const reset = () => {
+        pendingCount = 0;
+        if (timeoutId) {
+            clearTimeout(timeoutId);
+            timeoutId = null;
+        }
+        setState({ pending: false, error: null });
+    };
+
+    const boundary: SuspenseBoundary = { begin, end };
+    owner.suspense = boundary;
+    onCleanup(() => {
+        if (owner.suspense === boundary) {
+            owner.suspense = previousBoundary;
+        }
+    });
+
+    return [state, { begin, end, track, reset }] as const;
+}
 
 type ResourceState<T> = {
     loading: boolean;
@@ -503,10 +792,13 @@ export function createResource<T, S = undefined>(
     });
 
     let abortController: AbortController | null = null;
+    const suspenseBoundary = currentOwner?.suspense;
 
     const doFetch = async (sourceValue: S) => {
         if (abortController) abortController.abort();
         abortController = new AbortController();
+
+        suspenseBoundary?.begin();
 
         setState(prev => ({ ...prev, loading: true, error: null }));
 
@@ -515,14 +807,19 @@ export function createResource<T, S = undefined>(
             if (!abortController.signal.aborted) {
                 setState({ loading: false, error: null, data });
             }
+            suspenseBoundary?.end();
         } catch (error) {
-            if (!abortController.signal.aborted) {
-                setState(prev => ({
-                    ...prev,
-                    loading: false,
-                    error: error instanceof Error ? error : new Error(String(error)),
-                }));
+            if (abortController.signal.aborted) {
+                suspenseBoundary?.end();
+                return;
             }
+            const normalized = normalizeError(error);
+            setState(prev => ({
+                ...prev,
+                loading: false,
+                error: normalized,
+            }));
+            suspenseBoundary?.end(normalized);
         }
     };
 

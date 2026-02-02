@@ -1,0 +1,14 @@
+import type { FC } from '@/velocity';
+import { ActivityFeed } from '@/app/components/widgets/ActivityFeed';
+import { ThreatIntel } from '@/app/components/widgets/ThreatIntel';
+import { JobRunner } from '@/app/components/widgets/JobRunner';
+import { SessionStatus } from '@/app/components/widgets/SessionStatus';
+
+export const Sidebar: FC = () => (
+    <aside class="stack">
+        <ActivityFeed />
+        <ThreatIntel />
+        <JobRunner />
+        <SessionStatus />
+    </aside>
+);
