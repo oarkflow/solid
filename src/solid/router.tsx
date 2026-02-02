@@ -1,12 +1,17 @@
-import { createMemo, createSignal } from './reactivity';
+import { createMemo, createSignal, onCleanup, untrack, batch } from './reactivity';
 import { createElement } from './jsx';
 import type { FC, Props } from './jsx';
+
+// ============================================================================
+// Types
+// ============================================================================
 
 export type Route = {
     path: string;
     component: FC;
     guard?: () => boolean;
     redirectTo?: string;
+    meta?: Record<string, unknown>;
 };
 
 type CompiledRoute = Route & {
@@ -17,17 +22,63 @@ type CompiledRoute = Route & {
 type RouterOptions = {
     notFound?: FC;
     onBlocked?: (path: string) => void;
+    beforeEach?: (to: string, from: string) => boolean | string | void;
 };
 
 type NavigateOptions = {
     replace?: boolean;
+    state?: unknown;
 };
 
 export type RouterApi = {
     path: () => string;
     params: () => Record<string, string>;
+    query: () => URLSearchParams;
     navigate: (to: string, options?: NavigateOptions) => void;
+    back: () => void;
+    forward: () => void;
 };
+
+// ============================================================================
+// Security
+// ============================================================================
+
+const DANGEROUS_PROTOCOLS = /^(javascript|data|vbscript):/i;
+
+/**
+ * Sanitize and validate navigation path
+ */
+function sanitizePath(to: string): string | null {
+    if (typeof to !== 'string') return null;
+
+    const trimmed = to.trim();
+    if (DANGEROUS_PROTOCOLS.test(trimmed.toLowerCase())) {
+        console.warn(`[Router] Blocked dangerous URL: ${to}`);
+        return null;
+    }
+
+    try {
+        const url = new URL(to, window.location.origin);
+
+        // Block external navigation
+        if (url.origin !== window.location.origin) {
+            console.warn(`[Router] Blocked external navigation: ${to}`);
+            return null;
+        }
+
+        return url.pathname + url.search + url.hash;
+    } catch {
+        // If URL parsing fails, treat as relative path
+        if (to.startsWith('/')) {
+            return to;
+        }
+        return null;
+    }
+}
+
+// ============================================================================
+// Path Utilities
+// ============================================================================
 
 function normalizePath(path: string): string {
     if (!path) return '/';
@@ -40,65 +91,115 @@ function normalizePath(path: string): string {
 function compileRoute(route: Route): CompiledRoute {
     const keys: string[] = [];
     const normalized = normalizePath(route.path);
+
+    // Catch-all route
     if (normalized === '*' || normalized === '/*') {
         return { ...route, regex: /^.*$/, keys };
     }
 
+    // Build regex pattern
     const pattern = normalized
         .replace(/\//g, '\\/')
-        .replace(/:(\w+)/g, (_, key: string) => {
+        .replace(/:(\w+)(\?)?/g, (_, key: string, optional: string) => {
             keys.push(key);
-            return '([^\\/]+)';
+            return optional ? '(?:\\/([^\\/]+))?' : '([^\\/]+)';
         })
         .replace(/\*/g, '.*');
 
     return {
         ...route,
-        regex: new RegExp(`^${pattern}\/?$`),
+        regex: new RegExp(`^${pattern}\\/?$`),
         keys,
     };
 }
 
-function sanitizePath(to: string): string | null {
-    if (typeof to !== 'string') return null;
-    const lower = to.toLowerCase();
-    if (lower.startsWith('javascript:') || lower.startsWith('data:')) return null;
-
-    try {
-        const url = new URL(to, window.location.origin);
-        if (url.origin !== window.location.origin) return null;
-        return url.pathname + url.search + url.hash;
-    } catch {
-        return null;
-    }
-}
+// ============================================================================
+// Router Factory
+// ============================================================================
 
 export function createRouter(routes: Route[], options?: RouterOptions) {
     const compiled = routes.map(compileRoute);
+
+    // Reactive state
     const [path, setPath] = createSignal(window.location.pathname);
     const [params, setParams] = createSignal<Record<string, string>>({});
+    const [query, setQuery] = createSignal(new URLSearchParams(window.location.search));
 
+    // Update query params
+    const updateQuery = () => {
+        setQuery(new URLSearchParams(window.location.search));
+    };
+
+    /**
+     * Navigate to a new path
+     */
     const navigate = (to: string, navOptions?: NavigateOptions) => {
         const safe = sanitizePath(to);
         if (!safe) {
             options?.onBlocked?.(to);
             return;
         }
-        const nextPath = normalizePath(safe);
-        if (nextPath === normalizePath(path())) return;
 
-        if (navOptions?.replace) {
-            window.history.replaceState({}, '', safe);
-        } else {
-            window.history.pushState({}, '', safe);
+        const currentPath = normalizePath(path());
+        const nextPath = normalizePath(safe);
+
+        // Skip if same path
+        if (nextPath === currentPath && !to.includes('?')) {
+            return;
         }
-        setPath(window.location.pathname);
+
+        // Before navigation hook
+        if (options?.beforeEach) {
+            const result = options.beforeEach(nextPath, currentPath);
+            if (result === false) {
+                options?.onBlocked?.(to);
+                return;
+            }
+            if (typeof result === 'string') {
+                navigate(result, { replace: true });
+                return;
+            }
+        }
+
+        batch(() => {
+            if (navOptions?.replace) {
+                window.history.replaceState(navOptions?.state ?? {}, '', safe);
+            } else {
+                window.history.pushState(navOptions?.state ?? {}, '', safe);
+            }
+
+            setPath(window.location.pathname);
+            updateQuery();
+        });
     };
 
-    window.addEventListener('popstate', () => {
-        setPath(window.location.pathname);
+    /**
+     * Go back in history
+     */
+    const back = () => window.history.back();
+
+    /**
+     * Go forward in history
+     */
+    const forward = () => window.history.forward();
+
+    // Listen for popstate events
+    const handlePopState = () => {
+        batch(() => {
+            setPath(window.location.pathname);
+            updateQuery();
+        });
+    };
+
+    window.addEventListener('popstate', handlePopState);
+
+    onCleanup(() => {
+        window.removeEventListener('popstate', handlePopState);
     });
 
+    /**
+     * Resolve current route
+     */
     const resolve = createMemo(() => {
         const current = normalizePath(path());
 
@@ -106,30 +207,42 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
             const match = route.regex.exec(current);
             if (!match) continue;
 
+            // Extract params
             const nextParams: Record<string, string> = {};
             route.keys.forEach((key, index) => {
-                nextParams[key] = decodeURIComponent(match[index + 1] ?? '');
+                const value = match[index + 1];
+                if (value) {
+                    nextParams[key] = decodeURIComponent(value);
+                }
             });
 
-            if (route.guard && !route.guard()) {
-                const fallback = route.redirectTo ?? '/login';
-                if (normalizePath(fallback) !== current) {
-                    navigate(fallback, { replace: true });
+            // Check guard
+            if (route.guard) {
+                const allowed = untrack(() => route.guard!());
+                if (!allowed) {
+                    const fallback = route.redirectTo ?? '/login';
+                    if (normalizePath(fallback) !== current) {
+                        // Defer redirect to avoid loop
+                        queueMicrotask(() => navigate(fallback, { replace: true }));
+                    }
+                    setParams({});
+                    return { component: null, blocked: true, meta: route.meta };
                 }
-                setParams({});
-                return { component: null, blocked: true } as const;
             }
 
             setParams(nextParams);
-            return { component: route.component, blocked: false } as const;
+            return { component: route.component, blocked: false, meta: route.meta };
         }
 
         setParams({});
-        return { component: options?.notFound ?? null, blocked: false } as const;
+        return { component: options?.notFound ?? null, blocked: false, meta: {} };
     });
 
+    /**
+     * Router component - renders matched route
+     */
     const Router: FC = () => (
-        <div class="router-view">
+        <div class="router-view" data-path={path}>
             {() => {
                 const result = resolve();
                 if (result.blocked || !result.component) return null;
@@ -139,35 +252,65 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         </div>
     );
 
-    const Link: FC<Props & { to: string; class?: string; activeClass?: string }> = props => {
-        const isActive = () => normalizePath(path()) === normalizePath(props.to);
+    /**
+     * Link component - declarative navigation
+     */
+    const Link: FC<Props & {
+        to: string;
+        class?: string;
+        activeClass?: string;
+        exactActiveClass?: string;
+    }> = (props) => {
+        const isActive = createMemo(() => {
+            const currentPath = normalizePath(path());
+            const targetPath = normalizePath(props.to);
+            return currentPath === targetPath || currentPath.startsWith(targetPath + '/');
+        });
 
-        const handleClick = (event: Event) => {
+        const isExactActive = createMemo(() => {
+            return normalizePath(path()) === normalizePath(props.to);
+        });
+
+        const handleClick = (event: MouseEvent) => {
+            // Allow default behavior for modifier keys
+            if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+                return;
+            }
+
             event.preventDefault();
             navigate(props.to);
         };
 
-        if (props.activeClass) {
-            return (
-                <a
-                    href={props.to}
-                    class={props.class}
-                    classList={{ [props.activeClass]: isActive }}
-                    onClick={handleClick}
-                >
-                    {props.children}
-                </a>
-            );
-        }
+        const classes = createMemo(() => {
+            const classList: string[] = [];
+            if (props.class) classList.push(props.class);
+            if (props.activeClass && isActive()) classList.push(props.activeClass);
+            if (props.exactActiveClass && isExactActive()) classList.push(props.exactActiveClass);
+            return classList.join(' ');
+        });
 
         return (
-            <a href={props.to} class={props.class} onClick={handleClick}>
+            <a
+                href={props.to}
+                class={classes}
+                onClick={handleClick}
+            >
                 {props.children}
             </a>
         );
     };
 
-    const useRouter = (): RouterApi => ({ path, params, navigate });
+    /**
+     * Hook to access router API
+     */
+    const useRouter = (): RouterApi => ({
+        path,
+        params,
+        query,
+        navigate,
+        back,
+        forward,
+    });
 
     return { Router, Link, useRouter };
 }

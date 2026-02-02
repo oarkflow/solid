@@ -54,7 +54,7 @@ const appStore = createStore<AppState>(
     { storageKey: 'solid-app', version: 1 }
 );
 
-const authActions = createActions(authStore, (set, get, patch) => ({
+const authActions = createActions(authStore, ({ patch }) => ({
     login: (name: string) => {
         const token = typeof crypto !== 'undefined' && 'randomUUID' in crypto
             ? crypto.randomUUID()
@@ -100,7 +100,7 @@ const Home: FC = () => (
             <button
                 class="button ghost"
                 onClick={() => {
-                    appStore.update(['preferences', 'theme'], theme() === 'light' ? 'dark' : 'light');
+                    appStore.update('preferences.theme', theme() === 'light' ? 'dark' : 'light');
                     addActivity('Theme toggled');
                 }}
             >
@@ -111,7 +111,7 @@ const Home: FC = () => (
                 type="color"
                 value={accent}
                 onChange={(event: any) => {
-                    appStore.update(['preferences', 'accent'], event.target.value);
+                    appStore.update('preferences.accent', event.target.value);
                     addActivity('Accent updated');
                 }}
             />
@@ -172,7 +172,7 @@ const Settings: FC = () => (
             <button
                 class="button ghost"
                 onClick={() => {
-                    appStore.update(['flags', 'secureMode'], !appStore.state().flags.secureMode);
+                    appStore.update('flags.secureMode', (v: boolean) => !v);
                     addActivity('Secure mode toggled');
                 }}
             >
@@ -181,7 +181,7 @@ const Settings: FC = () => (
             <button
                 class="button ghost"
                 onClick={() => {
-                    appStore.update(['flags', 'betaAccess'], !appStore.state().flags.betaAccess);
+                    appStore.update('flags.betaAccess', (v: boolean) => !v);
                     addActivity('Beta access toggled');
                 }}
             >
