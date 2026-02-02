@@ -1,4 +1,4 @@
-import { createEffect } from './reactivity.js';
+import { createEffect } from './reactivity';
 
 export type Props = Record<string, any> & { children?: any };
 export type FC<P = {}> = (props: P & Props) => JSX.Element;
