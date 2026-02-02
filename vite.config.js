@@ -38,20 +38,26 @@ export default defineConfig(({ command, mode, ssrBuild }) => ({
 
             // SSR builds: keep simple splits (smaller surface for server bundle)
             if (ssrBuild) {
-                if (normalized.includes('/src/velocity/') || /\/src\/velocity$/.test(normalized)) return 'velocity-ssr';
-                if (normalized.includes('/src/') && !normalized.includes('/src/velocity/')) return 'app-ssr';
+                if (normalized.includes('/src/core/velocity/')) return 'velocity-ssr';
+                if (normalized.includes('/src/core/tailwindcss/')) return 'tailwindcss-ssr';
+                if (normalized.includes('/src/') && !normalized.includes('/src/core/velocity/') && !normalized.includes('/src/core/tailwindcss/')) return 'app-ssr';
                 if (normalized.includes('/node_modules/')) return 'vendor-ssr';
                 return null;
             }
 
             // Client builds: prefer per-package vendor splitting for long-term caching
-            if (normalized.includes('/src/velocity/') || /\/src\/velocity$/.test(normalized)) {
+            if (normalized.includes('/src/core/velocity/')) {
                 return 'velocity';
-          }
+            }
 
-            if (normalized.includes('/src/') && !normalized.includes('/src/velocity/')) {
-            return 'app';
-          }
+            if (normalized.includes('/src/core/tailwindcss/')) {
+                if (normalized.includes('tailwind.config.ts')) return 'tailwindcss.config';
+                return 'tailwindcss.core';
+            }
+
+            if (normalized.includes('/src/') && !normalized.includes('/src/core/velocity/') && !normalized.includes('/src/core/tailwindcss/')) {
+                return 'app';
+            }
 
           if (normalized.includes('/node_modules/')) {
               const vendorSplit = process.env.VENDOR_SPLIT !== 'false' ? DEFAULT_VENDOR_SPLIT : false;

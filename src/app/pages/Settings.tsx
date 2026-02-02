@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 import { appStore, addActivity } from '@/app/stores/app';
 
 export const SettingsPage: FC = () => (

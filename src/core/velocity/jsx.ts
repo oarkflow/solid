@@ -575,6 +575,172 @@ export function Portal(props: {
 }
 
 // ============================================================================
+// Error Boundary
+// ============================================================================
+
+export function ErrorBoundary(props: {
+    fallback: JSX.Element | ((error: Error, reset: () => void) => JSX.Element);
+    children: JSX.Element;
+}): JSX.Element {
+    const [error, setError] = createSignal<Error | null>(null);
+    const [key, setKey] = createSignal(0);
+
+    const reset = () => {
+        setError(null);
+        setKey(k => k + 1);
+    };
+
+    // Create error handler within effect scope
+    createEffect(() => {
+        // Access key to re-run when reset is called
+        key();
+    });
+
+    return (() => {
+        const err = error();
+        if (err) {
+            if (typeof props.fallback === 'function') {
+                return (props.fallback as (error: Error, reset: () => void) => JSX.Element)(err, reset);
+            }
+            return props.fallback;
+        }
+
+        try {
+            return props.children;
+        } catch (e) {
+            const normalizedError = e instanceof Error ? e : new Error(String(e));
+            setError(normalizedError);
+            if (typeof props.fallback === 'function') {
+                return (props.fallback as (error: Error, reset: () => void) => JSX.Element)(normalizedError, reset);
+            }
+            return props.fallback;
+        }
+    }) as unknown as JSX.Element;
+}
+
+// ============================================================================
+// Suspense Boundary
+// ============================================================================
+
+export function Suspense(props: {
+    fallback: JSX.Element;
+    children: JSX.Element;
+}): JSX.Element {
+    const [pending, setPending] = createSignal(false);
+    const [error, setError] = createSignal<Error | null>(null);
+
+    // Track pending async operations
+    let pendingCount = 0;
+
+    const suspenseContext = {
+        begin: () => {
+            pendingCount++;
+            setPending(true);
+        },
+        end: (err?: Error | null) => {
+            pendingCount--;
+            if (err) setError(err);
+            if (pendingCount <= 0) {
+                pendingCount = 0;
+                setPending(false);
+            }
+        }
+    };
+
+    return createRoot((dispose) => {
+        // Inject suspense context for children
+        const owner = getOwner() as any;
+        if (owner) {
+            owner.suspense = suspenseContext;
+        }
+
+        onCleanup(dispose);
+
+        return (() => {
+            const err = error();
+            if (err) {
+                return createElement('div', {
+                    style: { padding: '1rem', color: '#ef4444', backgroundColor: '#fef2f2', borderRadius: '0.5rem' }
+                }, `Error: ${err.message}`);
+            }
+
+            if (pending()) {
+                return props.fallback;
+            }
+
+            return props.children;
+        }) as unknown as JSX.Element;
+    });
+}
+
+// ============================================================================
+// Safe HTML Rendering
+// ============================================================================
+
+// Inline sanitization for Html component (avoids circular dependency)
+const HTML_DANGEROUS_TAGS = /(<script|<iframe|<object|<embed|<form|<input|<meta|<link|<style)[^>]*>.*?<\/\1>|(<script|<iframe|<object|<embed|<form|<input|<meta|<link|<style)[^>]*\/?>/gi;
+const HTML_DANGEROUS_ATTRS = /\s(on\w+|formaction|xlink:href)\s*=\s*["'][^"']*["']/gi;
+const HTML_DANGEROUS_PROTOCOLS = /\s(href|src|action)\s*=\s*["']?\s*javascript:[^"'\s>]*/gi;
+
+function inlineSanitizeHTML(html: string): string {
+    if (!html) return '';
+    return html
+        .replace(HTML_DANGEROUS_TAGS, '')
+        .replace(HTML_DANGEROUS_ATTRS, '')
+        .replace(HTML_DANGEROUS_PROTOCOLS, '');
+}
+
+/**
+ * Render HTML string safely with optional sanitization
+ *
+ * @example
+ * // Sanitized (default) - strips dangerous content
+ * <Html html="<p>Hello</p><script>alert('xss')</script>" />
+ *
+ * // Unsafe - renders HTML as-is (use with trusted content only!)
+ * <Html html={trustedContent} sanitize={false} />
+ */
+export function Html(props: {
+    html: string | (() => string);
+    /** Sanitize HTML to prevent XSS (default: true) */
+    sanitize?: boolean;
+    /** Element tag to use (default: 'div') */
+    as?: string;
+    /** Additional props to pass to the element */
+    class?: string;
+    style?: Record<string, any> | string;
+}): JSX.Element {
+    const tag = props.as || 'div';
+    const shouldSanitize = props.sanitize !== false;
+    const getHtml = typeof props.html === 'function' ? props.html : () => props.html as string;
+
+    const el = document.createElement(tag);
+
+    if (props.class) el.className = props.class;
+    if (props.style) {
+        if (typeof props.style === 'string') {
+            el.style.cssText = props.style;
+        } else {
+            Object.assign(el.style, props.style);
+        }
+    }
+
+    // Initial render
+    const rawHtml = getHtml();
+    el.innerHTML = shouldSanitize ? inlineSanitizeHTML(rawHtml) : rawHtml;
+
+    // Reactive updates if html is a function
+    if (typeof props.html === 'function') {
+        createEffect(() => {
+            const html = getHtml();
+            el.innerHTML = shouldSanitize ? inlineSanitizeHTML(html) : html;
+        });
+    }
+
+    return el as unknown as JSX.Element;
+}
+
+// ============================================================================
 // Render
 // ============================================================================
 

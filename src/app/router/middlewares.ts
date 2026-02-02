@@ -1,4 +1,4 @@
-import type { Middleware } from '@/velocity';
+import type { Middleware } from '@/core/velocity';
 import { addActivity } from '@/app/stores/app';
 
 export const auditTrailMiddleware: Middleware = ({ to, from }) => {

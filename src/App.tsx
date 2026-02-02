@@ -1,5 +1,5 @@
-import type { FC } from '@/velocity';
-import { createRouter, lazy } from '@/velocity';
+import type { FC } from '@/core/velocity';
+import { createRouter, lazy } from '@/core/velocity';
 import './index.css';
 
 const HomePage = lazy(() => import('@/app/pages/Home').then(m => ({ default: m.HomePage })));
@@ -13,7 +13,7 @@ const NotFoundPage = lazy(() => import('@/app/pages/NotFound').then(m => ({ defa
 import { Header } from '@/app/components/layout/Header';
 import { Sidebar } from '@/app/components/layout/Sidebar';
 import { Loading } from '@/app/components/layout/Loading';
-import TailwindApp from '@/app/components/TailwindCSS';
+import { TailwindDemo } from '@/app/components/TailwindDemo';
 
 import { isAuthenticated } from '@/app/stores/auth';
 import { theme, accent, addActivity } from '@/app/stores/app';
@@ -132,7 +132,7 @@ export const App: FC = () => (
         <main class="grid">
             <div class="stack">
                 <Router fallback={<Loading />} />
-                <TailwindApp />
+                <TailwindDemo />
             </div>
             <Sidebar />
         </main>

@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 
 type LoadingProps = {
     label?: string;

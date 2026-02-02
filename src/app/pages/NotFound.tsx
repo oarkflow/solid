@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 
 export const NotFoundPage: FC = () => (
     <section class="card">

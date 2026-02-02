@@ -1,4 +1,4 @@
-import type { FC, Props } from '@/velocity';
+import type { FC, Props } from '@/core/velocity';
 import { authActions, isAuthenticated, userName } from '@/app/stores/auth';
 import { addActivity } from '@/app/stores/app';
 

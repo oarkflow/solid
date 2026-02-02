@@ -1,4 +1,4 @@
-import { createSignal, createEffect, onCleanup, createTransition, createErrorBoundary, type FC } from '@/velocity';
+import { createSignal, createEffect, onCleanup, createTransition, createErrorBoundary, type FC } from '@/core/velocity';
 import { addActivity } from '@/app/stores/app';
 
 export const JobRunner: FC = () => {

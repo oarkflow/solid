@@ -73,6 +73,13 @@ export {
     Match,
     Portal,
 
+    // Error & Suspense boundaries
+    ErrorBoundary,
+    Suspense,
+
+    // Safe HTML rendering
+    Html,
+
     // DOM inspection
     getDOMSnapshot,
     getElementById,
@@ -123,6 +130,74 @@ export type {
 } from './router';
 
 // ============================================================================
+// Security
+// ============================================================================
+
+export {
+    escapeHTML,
+    unescapeHTML,
+    sanitizeHTML,
+    isValidUrl,
+    sanitizeUrl,
+    safeExternalLink,
+    sanitizeInput,
+    generateNonce,
+    createCSPContent,
+    CSP_PRESETS,
+    isValidEmail,
+    checkPasswordStrength,
+    sanitizeFilename,
+} from './security';
+
+export type {
+    SanitizeOptions,
+    InputSanitizeOptions,
+    CSPDirective,
+} from './security';
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+export {
+    // Environment
+    isServer,
+    isBrowser,
+    isDev,
+    getWindow,
+    getDocument,
+
+    // Events
+    debounce,
+    throttle,
+    createEventListener,
+    createMediaQuery,
+    createVisibilityState,
+    createOnlineStatus,
+
+    // Forms
+    createFormField,
+    createForm,
+    validators,
+
+    // General
+    uid,
+    deepClone,
+    deepEqual,
+    pick,
+    omit,
+    sleep,
+    clamp,
+    groupBy,
+} from './utils';
+
+export type {
+    FormField,
+    FormFieldOptions,
+    FormControl,
+} from './utils';
+
+// ============================================================================
 // JSX Factory (for TypeScript/Babel)
 // ============================================================================
 
@@ -130,6 +205,3 @@ import { createElement as _createElement } from './jsx';
 export const jsx = _createElement;
 export const jsxs = _createElement;
 export const jsxDEV = _createElement;
-
-// Devtools
-export { installDevtools, uninstallDevtools, attachSnapshotLogger } from './devtools';

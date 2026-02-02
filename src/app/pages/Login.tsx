@@ -1,4 +1,4 @@
-import { createSignal, type FC, startTransition } from '@/velocity';
+import { createSignal, type FC, startTransition } from '@/core/velocity';
 import { authActions } from '@/app/stores/auth';
 import { addActivity } from '@/app/stores/app';
 import { getRouterApi } from '@/app/router/navigation';

@@ -1,4 +1,4 @@
-import { createStore } from '@/velocity';
+import { createStore } from '@/core/velocity';
 
 export type AppState = {
     counter: number;

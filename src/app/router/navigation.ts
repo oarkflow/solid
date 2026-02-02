@@ -1,4 +1,4 @@
-import type { RouterApi } from '@/velocity';
+import type { RouterApi } from '@/core/velocity';
 
 let routerApi: RouterApi | null = null;
 

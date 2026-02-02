@@ -1,4 +1,4 @@
-import { createTransition, type FC } from '@/velocity';
+import { createTransition, type FC } from '@/core/velocity';
 import { appStore, counter, theme, accent, addActivity } from '@/app/stores/app';
 
 export const HomePage: FC = () => {

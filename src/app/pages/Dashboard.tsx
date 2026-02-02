@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 import { authStore, userName } from '@/app/stores/auth';
 import { appStore } from '@/app/stores/app';
 

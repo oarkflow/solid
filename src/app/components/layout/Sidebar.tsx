@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 import { ActivityFeed } from '@/app/components/widgets/ActivityFeed';
 import { ThreatIntel } from '@/app/components/widgets/ThreatIntel';
 import { JobRunner } from '@/app/components/widgets/JobRunner';

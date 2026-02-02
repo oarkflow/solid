@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 import { getRouterApi } from '@/app/router/navigation';
 
 export const ProfilePage: FC = () => {

@@ -1,4 +1,4 @@
-import { createSignal, createSuspense, createResource, type FC } from '@/velocity';
+import { createSignal, createSuspense, createResource, type FC } from '@/core/velocity';
 import { addActivity } from '@/app/stores/app';
 
 type ThreatIntel = {

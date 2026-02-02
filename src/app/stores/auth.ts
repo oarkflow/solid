@@ -1,4 +1,4 @@
-import { createMemo, createStore, createActions } from '@/velocity';
+import { createMemo, createStore, createActions } from '@/core/velocity';
 
 export type AuthState = {
     user: { name: string; role: 'user' | 'admin' } | null;

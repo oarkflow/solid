@@ -1,5 +1,5 @@
-import type { FC } from '@/velocity';
-import { createSignal, createMemo } from '@/velocity';
+import type { FC } from '@/core/velocity';
+import { createSignal, createMemo } from '@/core/velocity';
 import { addActivity } from '@/app/stores/app';
 
 // Simulated large component with heavy computation

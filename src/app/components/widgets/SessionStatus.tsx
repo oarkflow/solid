@@ -1,4 +1,4 @@
-import type { FC } from '@/velocity';
+import type { FC } from '@/core/velocity';
 import { authStore, isAuthenticated } from '@/app/stores/auth';
 
 export const SessionStatus: FC = () => (
