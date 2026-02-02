@@ -1,4 +1,4 @@
-import { createMemo, createSignal, onCleanup, untrack, batch } from './reactivity';
+import { createMemo, createSignal, onCleanup, untrack, batch, createSuspense } from './reactivity';
 import { createElement } from './jsx';
 import type { FC, Props } from './jsx';
 
@@ -52,12 +52,15 @@ export type Route = {
     redirectTo?: string;
     meta?: RouteMetaInput;
     middlewares?: Middleware[];
+    children?: Route[];
 };
 
 type CompiledRoute = Route & {
     regex: RegExp;
+    prefixRegex: RegExp;
     keys: string[];
     score: number;
+    children?: CompiledRoute[];
 };
 
 export type HeadConfig = {
@@ -150,12 +153,20 @@ function scoreRoute(path: string): number {
     }, 0);
 }
 
-function compileRoute(route: Route): CompiledRoute {
+function joinPaths(base: string, path: string): string {
+    if (!path) return base || '/';
+    if (path.startsWith('/')) return path;
+    if (base === '/' || !base) return `/${path}`;
+    return `${base}/${path}`;
+}
+
+function compileRoute(route: Route, basePath: string): CompiledRoute {
+    const { children, ...rest } = route;
     const keys: string[] = [];
-    const normalized = normalizePath(route.path);
+    const normalized = normalizePath(joinPaths(basePath, route.path));
 
     if (normalized === '*' || normalized === '/*') {
-        return { ...route, regex: /^.*$/, keys, score: -1 };
+        return { ...rest, regex: /^.*$/, prefixRegex: /^.*$/, keys, score: -1 };
     }
 
     const pattern = normalized
@@ -167,11 +178,24 @@ function compileRoute(route: Route): CompiledRoute {
         .replace(/\*/g, '.*');
 
     return {
-        ...route,
-        regex: new RegExp(`^${pattern}\\/?$`),
+        ...rest,
+        regex: new RegExp(`^${pattern}\/?$`),
+        prefixRegex: new RegExp(`^${pattern}(?:\/.*)?$`),
         keys,
         score: scoreRoute(normalized),
     };
+}
+
+function compileRoutes(routes: Route[], basePath = ''): CompiledRoute[] {
+    return routes
+        .map(route => {
+            const compiled = compileRoute(route, basePath);
+            if (route.children?.length) {
+                compiled.children = compileRoutes(route.children, normalizePath(joinPaths(basePath, route.path)));
+            }
+            return compiled;
+        })
+        .sort((a, b) => b.score - a.score);
 }
 
 function resolveMeta(
@@ -273,9 +297,7 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         throw new Error('[Router] Window is not available.');
     }
 
-    const compiled = routes
-        .map(compileRoute)
-        .sort((a, b) => b.score - a.score);
+    const compiled = compileRoutes(routes);
 
     const headManager = createHeadManager(options?.head);
     const globalMiddlewares = options?.middlewares ?? [];
@@ -355,7 +377,8 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         nextParams: Record<string, string>,
         nextMeta: RouteMeta | undefined,
         currentPath: string,
-        currentQuery: URLSearchParams
+        currentQuery: URLSearchParams,
+        includeGlobal = true
     ): 'ok' | 'blocked' | 'redirected' => {
         if (!globalMiddlewares.length && !(route.middlewares?.length)) {
             return 'ok';
@@ -369,7 +392,10 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
             navigate,
         };
 
-        const pipeline = [...globalMiddlewares, ...(route.middlewares ?? [])];
+        const pipeline = [
+            ...(includeGlobal ? globalMiddlewares : []),
+            ...(route.middlewares ?? []),
+        ];
         for (const middleware of pipeline) {
             const outcome = untrack(() => middleware(context));
             if (outcome === false) {
@@ -387,70 +413,164 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         const currentPath = normalizePath(path());
         const currentQuery = query();
 
-        for (const route of compiled) {
-            const match = route.regex.exec(currentPath);
-            if (!match) continue;
-
+        const extractParams = (route: CompiledRoute, match: RegExpExecArray | null) => {
             const nextParams: Record<string, string> = {};
+            if (!match) return nextParams;
             route.keys.forEach((key, index) => {
                 const value = match[index + 1];
                 if (value) {
                     nextParams[key] = decodeURIComponent(value);
                 }
             });
+            return nextParams;
+        };
 
-            if (route.guard) {
-                const allowed = untrack(() => route.guard!());
-                if (!allowed) {
-                    const fallback = route.redirectTo ?? '/login';
-                    if (normalizePath(fallback) !== currentPath) {
-                        queueMicrotask(() => navigate(fallback, { replace: true }));
+        const findBestMatch = (routesToSearch: CompiledRoute[]): { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null => {
+            let best: { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null = null;
+
+            for (const route of routesToSearch) {
+                const hasChildren = Boolean(route.children && route.children.length);
+                const prefixMatch = hasChildren ? route.prefixRegex.exec(currentPath) : null;
+                const exactMatch = route.regex.exec(currentPath);
+
+                if (!hasChildren && !exactMatch) continue;
+                if (hasChildren && !prefixMatch && !exactMatch) continue;
+
+                const baseMatch = prefixMatch ?? exactMatch;
+                const baseParams = extractParams(route, baseMatch);
+
+                let candidate: { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null = null;
+                if (hasChildren) {
+                    const childMatch = findBestMatch(route.children!);
+                    if (childMatch) {
+                        candidate = {
+                            stack: [route, ...childMatch.stack],
+                            params: { ...baseParams, ...childMatch.params },
+                            score: route.score + childMatch.score,
+                        };
                     }
-                    setParams({});
-                    applyMeta(undefined);
-                    options?.onBlocked?.(currentPath);
-                    return { component: null, blocked: true, meta: undefined };
+                }
+
+                if (!candidate && exactMatch) {
+                    candidate = { stack: [route], params: baseParams, score: route.score };
+                }
+
+                if (candidate) {
+                    if (!best || candidate.score > best.score || candidate.stack.length > best.stack.length) {
+                        best = candidate;
+                    }
                 }
             }
 
-            const routeMeta = resolveMeta(route.meta, nextParams, currentQuery);
-            const middlewareOutcome = runMiddlewares(route, nextParams, routeMeta, currentPath, currentQuery);
-            if (middlewareOutcome === 'blocked') {
-                setParams({});
-                applyMeta(undefined);
-                options?.onBlocked?.(currentPath);
-                return { component: null, blocked: true, meta: routeMeta };
-            }
-            if (middlewareOutcome === 'redirected') {
-                return { component: null, blocked: true, meta: routeMeta };
+            return best;
+        };
+
+        const matched = findBestMatch(compiled);
+
+        if (matched) {
+            let routeMeta: RouteMeta | undefined;
+            let blocked = false;
+
+            for (let i = 0; i < matched.stack.length; i++) {
+                const route = matched.stack[i];
+
+                if (route.guard) {
+                    const allowed = route.guard!();
+                    if (!allowed) {
+                        const fallback = route.redirectTo ?? '/login';
+                        if (normalizePath(fallback) !== currentPath) {
+                            queueMicrotask(() => navigate(fallback, { replace: true }));
+                        }
+                        setParams({});
+                        applyMeta(undefined);
+                        options?.onBlocked?.(currentPath);
+                        blocked = true;
+                        break;
+                    }
+                }
+
+                routeMeta = resolveMeta(route.meta, matched.params, currentQuery);
+                const middlewareOutcome = runMiddlewares(route, matched.params, routeMeta, currentPath, currentQuery, i === 0);
+                if (middlewareOutcome === 'blocked') {
+                    setParams({});
+                    applyMeta(undefined);
+                    options?.onBlocked?.(currentPath);
+                    blocked = true;
+                    break;
+                }
+                if (middlewareOutcome === 'redirected') {
+                    blocked = true;
+                    break;
+                }
             }
 
-            setParams(nextParams);
+            if (blocked) {
+                return { stack: [], blocked: true, meta: routeMeta };
+            }
+
+            setParams(matched.params);
             applyMeta(routeMeta);
-            lastSnapshot = { path: currentPath, meta: routeMeta, route };
-            return { component: route.component, blocked: false, meta: routeMeta };
+            const leaf = matched.stack[matched.stack.length - 1];
+            lastSnapshot = { path: currentPath, meta: routeMeta, route: leaf };
+            return { stack: matched.stack, blocked: false, meta: routeMeta };
         }
 
         setParams({});
         const fallbackMeta = resolveMeta(options?.notFoundMeta, {}, currentQuery);
         applyMeta(fallbackMeta);
         lastSnapshot = { path: currentPath, meta: fallbackMeta };
-        return { component: options?.notFound ?? null, blocked: false, meta: fallbackMeta };
+        return {
+            stack: options?.notFound ? [{
+                path: '*',
+                component: options.notFound,
+                regex: /^.*$/,
+                prefixRegex: /^.*$/,
+                keys: [],
+                score: -1,
+            }] : [], blocked: false, meta: fallbackMeta
+        };
     });
 
     /**
      * Router component - renders matched route
      */
-    const Router: FC = () => (
-        <div class="router-view" data-path={path}>
-            {() => {
-                const result = resolve();
-                if (result.blocked || !result.component) return null;
-                const Component = result.component;
-                return <Component />;
-            }}
-        </div>
-    );
+    let currentOutlet: (() => JSX.Element | null) | null = null;
+
+    const renderStack = (stack: CompiledRoute[], index = 0): JSX.Element | null => {
+        const route = stack[index];
+        if (!route) return null;
+        const Component = route.component;
+        const prevOutlet = currentOutlet;
+        currentOutlet = () => renderStack(stack, index + 1);
+        try {
+            return <Component />;
+        } finally {
+            currentOutlet = prevOutlet;
+        }
+    };
+
+    const Outlet: FC = () => createElement('div', { style: { display: 'contents' } }, () => currentOutlet ? currentOutlet() : null);
+
+    const Router: FC<{ fallback?: JSX.Element }> = (props) => {
+        const [suspenseState] = createSuspense();
+        return (
+            <div class="router-view" data-path={path}>
+                {() => {
+                    const result = resolve();
+                    if (result.blocked || !result.stack.length) return null;
+                    const suspense = suspenseState();
+                    return (
+                        <div style={{ display: 'contents' }}>
+                            {suspense.pending ? (props.fallback ?? null) : null}
+                            <div style={{ display: suspense.pending ? 'none' : 'contents' }}>
+                                {renderStack(result.stack)}
+                            </div>
+                        </div>
+                    );
+                }}
+            </div>
+        );
+    };
 
     /**
      * Link component - declarative navigation
@@ -513,5 +633,5 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         forward,
     });
 
-    return { Router, Link, useRouter };
+    return { Router, Link, useRouter, Outlet };
 }

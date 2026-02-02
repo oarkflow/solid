@@ -22,6 +22,8 @@ export {
     // Lifecycle
     onCleanup,
     onMount,
+    onError,
+    createErrorBoundary,
 
     // Advanced reactivity
     batch,
@@ -30,7 +32,10 @@ export {
     createRoot,
     getOwner,
     runWithOwner,
-
+    createSuspense,
+    createTransition,
+    useTransition,
+    startTransition,
     // Memoization utilities
     createCallback,
     createDerived,
@@ -76,6 +81,9 @@ export {
     getComponentsTree,
     getComponentInstances,
     getElementsForComponent,
+
+    // Lazy loading
+    lazy,
 } from './jsx';
 
 export type { FC, Props } from './jsx';

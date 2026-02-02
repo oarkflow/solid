@@ -11,7 +11,10 @@
     "outDir": "dist",
     "jsx": "react",
     "jsxFactory": "createElement",
-    "jsxFragmentFactory": "Fragment"
+    "jsxFragmentFactory": "Fragment",
+    "paths": {
+        "@/*": [ "./src/*" ]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

@@ -19,7 +19,12 @@ export default defineConfig(({ command, mode, ssrBuild }) => ({
     jsx: 'transform',
     jsxFactory: 'createElement',
     jsxFragment: 'Fragment'
-  },
+    },
+    resolve: {
+        alias: {
+            "@": path.resolve(__dirname, "./src"),
+        },
+    },
   build: {
     minify: true,
     rollupOptions: {

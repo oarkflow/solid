@@ -1,4 +1,4 @@
-import { createEffect, onCleanup, untrack, getDevSnapshot } from './reactivity';
+import { createEffect, onCleanup, untrack, getDevSnapshot, createRoot, createSignal, getOwner } from './reactivity';
 
 // ============================================================================
 // Types
@@ -32,7 +32,7 @@ const elementIdMap = new Map<number, Element>();
 
 // Component instance registry
 let componentInstanceCounter = 0;
-const componentInstances = new Map<number, { id: number; name: string; func?: Function; renders: number; lastRender?: number; parentId?: number | null; children: Set<number> }>();
+const componentInstances = new Map<number, { id: number; name: string; func?: Function; renders: number; updates: number; lastRender?: number; parentId?: number | null; children: Set<number> }>();
 const componentStack: number[] = [];
 
 function markUpdated(el: Element) {
@@ -41,13 +41,12 @@ function markUpdated(el: Element) {
         if (!meta) return;
         meta.updates = (meta.updates || 0) + 1;
         meta.lastUpdated = Date.now();
-        // Visual highlight when devtools enabled
-        try {
-            if (getDevSnapshot().enabled) {
-                el.classList.add('solid-dev-updated');
-                setTimeout(() => el.classList.remove('solid-dev-updated'), 1200);
+        if (meta.componentId != null) {
+            const comp = componentInstances.get(meta.componentId);
+            if (comp) {
+                comp.updates = (comp.updates || 0) + 1;
             }
-        } catch { /* ignore */ }
+        }
     } catch (e) {
         // silent
     }
@@ -55,9 +54,9 @@ function markUpdated(el: Element) {
 
 // Component helpers
 export function getComponentSnapshot() {
-    const arr: Array<{ id: number; name: string; renders: number; lastRender?: number; parentId?: number | null; children: number[] }> = [];
+    const arr: Array<{ id: number; name: string; renders: number; updates: number; lastRender?: number; parentId?: number | null; children: number[] }> = [];
     for (const meta of componentInstances.values()) {
-        arr.push({ id: meta.id, name: meta.name, renders: meta.renders, lastRender: meta.lastRender, parentId: meta.parentId ?? null, children: [...meta.children] });
+        arr.push({ id: meta.id, name: meta.name, renders: meta.renders, updates: meta.updates, lastRender: meta.lastRender, parentId: meta.parentId ?? null, children: [...meta.children] });
     }
     return arr;
 }
@@ -242,11 +241,11 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
                 }
             }
 
-            // mark parent updated
-            if (parent instanceof Element) {
-                const pm = elementRegistry.get(parent);
-                if (pm) { pm.updates++; pm.lastUpdated = Date.now(); }
-                markUpdated(parent);
+            // mark updated elements
+            for (const n of nodes) {
+                if (n.nodeType === 1) {
+                    markUpdated(n as Element);
+                }
             }
         });
 
@@ -270,7 +269,7 @@ export function createElement(
         const instanceId = ++componentInstanceCounter;
         const name = (tag as any).displayName || (tag as any).name || 'Anonymous';
         const parentId = componentStack.length ? componentStack[componentStack.length - 1] : null;
-        const meta: any = { id: instanceId, name, func: tag, renders: 0, lastRender: undefined, parentId, children: new Set<number>() };
+        const meta: any = { id: instanceId, name, func: tag, renders: 0, updates: 0, lastRender: undefined, parentId, children: new Set<number>() };
         componentInstances.set(instanceId, meta);
         if (parentId != null) {
             const pm = componentInstances.get(parentId) as any;
@@ -278,18 +277,26 @@ export function createElement(
         }
 
         // push instance, run component, and pop
-        componentStack.push(instanceId);
-        const prev = (globalThis as any).__CURRENT_COMPONENT_ID;
-        (globalThis as any).__CURRENT_COMPONENT_ID = instanceId;
-        try {
-            meta.renders++;
-            meta.lastRender = Date.now();
-            const res = untrack(() => (tag as any)({ ...(props ?? {}), children: children.length === 1 ? children[0] : children.length ? children : props?.children }));
-            return res as JSX.Element;
-        } finally {
-            componentStack.pop();
-            (globalThis as any).__CURRENT_COMPONENT_ID = prev;
-        }
+        const renderComponent = () => {
+            componentStack.push(instanceId);
+            const prev = (globalThis as any).__CURRENT_COMPONENT_ID;
+            (globalThis as any).__CURRENT_COMPONENT_ID = instanceId;
+            try {
+                const liveName = (tag as any).displayName || (tag as any).name || meta.name;
+                if (liveName && meta.name !== liveName) {
+                    meta.name = liveName;
+                }
+                meta.renders++;
+                meta.lastRender = Date.now();
+                const res = untrack(() => (tag as any)({ ...(props ?? {}), children: children.length === 1 ? children[0] : children.length ? children : props?.children }));
+                return res as JSX.Element;
+            } finally {
+                componentStack.pop();
+                (globalThis as any).__CURRENT_COMPONENT_ID = prev;
+            }
+        };
+
+        return createRoot(() => renderComponent());
     }
 
     // Create element
@@ -462,6 +469,70 @@ export function Match<T>(props: {
     }
 
     return result as JSX.Element;
+}
+
+// ============================================================================
+// Lazy Loading
+// ============================================================================
+
+export function lazy<T extends FC<any>>(
+    loader: () => Promise<{ default: T }>
+): T {
+    let cached: T | null = null;
+    let pending = false;
+    let suspenseBoundary: { begin: () => void; end: (error?: Error | null) => void } | undefined;
+    const [loading, setLoading] = createSignal(false);
+    const [error, setError] = createSignal<Error | null>(null);
+
+    const LazyComponent: FC<any> = (props) => {
+        if (!pending && !cached) {
+            pending = true;
+            setLoading(true);
+            const owner = getOwner() as { suspense?: { begin: () => void; end: (error?: Error | null) => void } } | null;
+            suspenseBoundary = owner?.suspense;
+            suspenseBoundary?.begin();
+            loader()
+                .then(module => {
+                    cached = module.default;
+                    const loadedName = (cached as any).displayName || (cached as any).name;
+                    if (loadedName) {
+                        (LazyComponent as any).displayName = loadedName;
+                        for (const meta of componentInstances.values()) {
+                            if (meta.func === LazyComponent) {
+                                meta.name = loadedName;
+                            }
+                        }
+                    }
+                    setLoading(false);
+                    suspenseBoundary?.end();
+                })
+                .catch(err => {
+                    const normalized = err instanceof Error ? err : new Error(String(err));
+                    setError(normalized);
+                    setLoading(false);
+                    suspenseBoundary?.end(normalized);
+                });
+        }
+
+        return createElement('div', { style: { display: 'contents' } }, () => {
+            const err = error();
+            if (err) {
+                return createElement(
+                    'div',
+                    { class: 'card', style: { padding: '20px', color: '#ef4444' } },
+                    `Error loading component: ${err.message}`
+                );
+            }
+
+            if (loading() || !cached) {
+                return null;
+            }
+
+            return cached(props);
+        });
+    };
+
+    return LazyComponent as T;
 }
 
 export function Portal(props: {

@@ -1,5 +1,5 @@
 import { App } from "./App";
-import { installDevtools, render } from "./velocity";
+import { render } from "@/velocity";
 
 
 // Auto-install devtools in dev mode
@@ -8,7 +8,9 @@ const __isDev = (
     (typeof globalThis !== 'undefined' && 'process' in globalThis && (globalThis as any).process?.env?.NODE_ENV !== 'production')
 );
 if (__isDev) {
-    installDevtools({ autoOpen: true, autoEnableInDev: true, highlightUpdates: true, autoBindSelector: '.button' });
+    import('./velocity/devtools').then(({ installDevtools }) => {
+        installDevtools({ autoOpen: true, autoEnableInDev: true, highlightUpdates: true, autoBindSelector: '.button' });
+    }).catch(error => console.warn('[Devtools] Failed to load', error));
 }
 
 render(<App />, document.getElementById('root')!);

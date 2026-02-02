@@ -145,7 +145,7 @@ export function createStore<T extends object>(
 
     const [state, setSignal] = createSignal<T>(
         cloneDeep(initial),
-        { equals: false }
+        { equals: false, name: options?.storageKey ?? 'store' }
     );
 
     const subscribers = new Set<(state: T) => void>();
@@ -216,7 +216,7 @@ export function createStore<T extends object>(
             } catch (e) {
                 console.warn('[Store] Failed to persist to storage:', e);
             }
-        });
+        }, { name: `store:${options.storageKey}` });
     }
 
     const patch: StoreApi<T>['patch'] = (partial) => {

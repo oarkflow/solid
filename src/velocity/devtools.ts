@@ -6,25 +6,166 @@ let compSearchInput: HTMLInputElement | null = null;
 let domSearchInput: HTMLInputElement | null = null;
 
 let panel: HTMLDivElement | null = null;
+let launcher: HTMLButtonElement | null = null;
 let autoRefresh = false;
 let refreshIntervalId: number | null = null;
+let panelCollapsed = false;
+
+function formatValue(value: any, max = 160) {
+    let text = '';
+    try {
+        text = typeof value === 'string' ? value : JSON.stringify(value);
+    } catch {
+        try { text = String(value); } catch { text = '—'; }
+    }
+    if (!text) text = '—';
+    if (text.length > max) return `${text.slice(0, max)}…`;
+    return text;
+}
 
 function renderSnapshot() {
     if (!panel) return;
     const reactivityNode = panel.querySelector('#solid-devtools-reactivity') as HTMLElement | null;
-    const domNode = panel.querySelector('#solid-devtools-dom') as HTMLElement | null;
+    const instancesNode = panel.querySelector('#solid-devtools-instances') as HTMLElement | null;
     const componentsNode = panel.querySelector('#solid-devtools-components') as HTMLElement | null;
-    if (!reactivityNode || !domNode || !componentsNode) return;
+    if (!reactivityNode || !instancesNode || !componentsNode) return;
 
     const snapshot = createSnapshot();
+    const componentNames = new Map<number, string>();
+    getComponentInstances().forEach(instance => {
+        componentNames.set(instance.id, instance.name || 'Anonymous');
+    });
 
     // Render reactivity
     reactivityNode.innerHTML = '';
-    const pre = document.createElement('pre');
-    pre.style.margin = '0';
-    pre.style.whiteSpace = 'pre-wrap';
-    pre.textContent = JSON.stringify(snapshot.reactivity, null, 2);
-    reactivityNode.appendChild(pre);
+    const reactivity = snapshot.reactivity;
+
+    const summary = document.createElement('div');
+    summary.className = 'devtools-summary';
+
+    const summaryItems = [
+        { label: 'Enabled', value: reactivity.enabled ? 'Yes' : 'No' },
+        { label: 'Signals', value: String(reactivity.signals.length) },
+        { label: 'Effects', value: String(reactivity.effects.length) },
+        { label: 'Pending', value: String(reactivity.pendingEffects) },
+        { label: 'Batch', value: String(reactivity.batchDepth) },
+    ];
+
+    for (const item of summaryItems) {
+        const card = document.createElement('div');
+        card.className = 'devtools-summary-card';
+
+        const label = document.createElement('div');
+        label.className = 'devtools-summary-label';
+        label.textContent = item.label;
+
+        const value = document.createElement('div');
+        value.className = 'devtools-summary-value';
+        value.textContent = item.value;
+
+        card.appendChild(label);
+        card.appendChild(value);
+        summary.appendChild(card);
+    }
+
+    const signalsSection = document.createElement('div');
+    signalsSection.className = 'devtools-block';
+    const signalsTitle = document.createElement('div');
+    signalsTitle.className = 'devtools-section-title';
+    signalsTitle.textContent = 'Signals';
+    signalsSection.appendChild(signalsTitle);
+
+    const signalsList = document.createElement('div');
+    signalsList.className = 'devtools-list';
+    const signalOwnerMap = new Map<number, string[]>();
+    for (const entry of reactivity.components) {
+        const name = componentNames.get(entry.id) ?? `Component #${entry.id}`;
+        for (const sigId of entry.signals) {
+            const list = signalOwnerMap.get(sigId) ?? [];
+            list.push(name);
+            signalOwnerMap.set(sigId, list);
+        }
+    }
+
+    for (const signal of reactivity.signals) {
+        const item = document.createElement('details');
+        item.className = 'devtools-list-item';
+
+        const header = document.createElement('summary');
+        header.className = 'devtools-list-row';
+
+        const name = document.createElement('span');
+        name.className = 'devtools-tree-label';
+        const owners = signalOwnerMap.get(signal.id) ?? [];
+        const inferredName = owners.length ? `Signal in ${owners[0]}` : undefined;
+        name.textContent = signal.name
+            ? `${signal.name} (#${signal.id})`
+            : inferredName
+                ? `${inferredName} (#${signal.id})`
+                : `signal #${signal.id}`;
+
+        const meta = document.createElement('span');
+        meta.className = 'devtools-tree-meta';
+        meta.textContent = `r ${signal.reads} · w ${signal.writes}`;
+
+        header.appendChild(name);
+        header.appendChild(meta);
+        item.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'devtools-details';
+        body.textContent = `value: ${formatValue(signal.value)}\nused by: ${owners.join(', ') || '—'}`;
+        item.appendChild(body);
+
+        signalsList.appendChild(item);
+    }
+    signalsSection.appendChild(signalsList);
+
+    const effectsSection = document.createElement('div');
+    effectsSection.className = 'devtools-block';
+    const effectsTitle = document.createElement('div');
+    effectsTitle.className = 'devtools-section-title';
+    effectsTitle.textContent = 'Effects';
+    effectsSection.appendChild(effectsTitle);
+
+    const effectsList = document.createElement('div');
+    effectsList.className = 'devtools-list';
+    for (const effect of reactivity.effects) {
+        const item = document.createElement('details');
+        item.className = 'devtools-list-item';
+
+        const header = document.createElement('summary');
+        header.className = 'devtools-list-row';
+
+        const name = document.createElement('span');
+        name.className = 'devtools-tree-label';
+        const ownerName = effect.owner != null
+            ? (componentNames.get(effect.owner) ?? `Component #${effect.owner}`)
+            : '—';
+        const effectLabel = effect.name || (ownerName !== '—' ? `Effect in ${ownerName}` : undefined);
+        name.textContent = effectLabel ? `${effectLabel} (#${effect.id})` : `effect #${effect.id}`;
+
+        const meta = document.createElement('span');
+        meta.className = 'devtools-tree-meta';
+        meta.textContent = `runs ${effect.runs}`;
+
+        header.appendChild(name);
+        header.appendChild(meta);
+        item.appendChild(header);
+
+        const body = document.createElement('div');
+        body.className = 'devtools-details';
+        const lastRun = effect.lastRun ? new Date(effect.lastRun).toLocaleTimeString() : '—';
+        body.textContent = `owner: ${ownerName}\nlast run: ${lastRun}\nsignals: ${(effect.signals || []).join(', ') || '—'}`;
+        item.appendChild(body);
+
+        effectsList.appendChild(item);
+    }
+    effectsSection.appendChild(effectsList);
+
+    reactivityNode.appendChild(summary);
+    reactivityNode.appendChild(signalsSection);
+    reactivityNode.appendChild(effectsSection);
 
     // Setup search listeners (once)
     if (domSearchInput && !(domSearchInput as any)._listenerAdded) {
@@ -38,110 +179,190 @@ function renderSnapshot() {
 
     // Render components tree with filter
     componentsNode.innerHTML = '';
-    const comps = getComponentsTree();
-    const compFilter = (compSearchInput && compSearchInput.value) ? compSearchInput.value.toLowerCase() : '';
+    const comps = (() => {
+        const instances = getComponentInstances();
+        const byId = new Map<number, { id: number; name: string; renders: number; lastRender?: number; parentId?: number | null; children: Set<number> }>();
+        const elementOwners = new Map<Element, number>();
 
-    function renderCompNode(node: any, indent = 0) {
-        // If filter present and node/name doesn't match, still traverse children
-        const matches = !compFilter || node.name.toLowerCase().includes(compFilter);
-        if (!matches) {
-            if (node.children) {
-                for (const child of node.children) renderCompNode(child, indent + 1);
+        for (const inst of instances) {
+            byId.set(inst.id, { ...inst, parentId: inst.parentId ?? null, children: new Set(inst.children ?? []) });
+            const elIds = getElementsForComponent(inst.id);
+            for (const elId of elIds) {
+                const el = getElementById(elId);
+                if (el) {
+                    elementOwners.set(el, inst.id);
+                }
             }
-            return;
         }
 
-        const row = document.createElement('div');
-        row.style.display = 'flex';
-        row.style.justifyContent = 'space-between';
-        row.style.paddingLeft = `${indent * 12}px`;
-        row.style.cursor = 'pointer';
-        row.style.padding = '4px 6px';
+        for (const inst of instances) {
+            const meta = byId.get(inst.id);
+            if (!meta || meta.parentId) continue;
+            const elIds = getElementsForComponent(inst.id);
+            if (!elIds.length) continue;
+            const el = getElementById(elIds[0]);
+            if (!el) continue;
 
-        const label = document.createElement('div');
+            let parent: Element | null = el.parentElement;
+            while (parent) {
+                const parentId = elementOwners.get(parent);
+                if (parentId && parentId !== inst.id) {
+                    meta.parentId = parentId;
+                    const parentMeta = byId.get(parentId);
+                    if (parentMeta) parentMeta.children.add(inst.id);
+                    break;
+                }
+                parent = parent.parentElement;
+            }
+        }
+
+        const roots: any[] = [];
+        for (const meta of byId.values()) {
+            if (!meta.parentId) {
+                roots.push(meta);
+            }
+        }
+
+        const buildNode = (meta: { id: number; name: string; renders: number; updates?: number; lastRender?: number; children: Set<number> }): any => ({
+            id: meta.id,
+            name: meta.name,
+            renders: meta.renders,
+            updates: meta.updates ?? 0,
+            lastRender: meta.lastRender,
+            children: [...meta.children]
+                .map(childId => byId.get(childId))
+                .filter(Boolean)
+                .map(child => buildNode(child!)),
+        });
+
+        return roots.map(root => buildNode(root));
+    })();
+    const compFilter = (compSearchInput && compSearchInput.value) ? compSearchInput.value.toLowerCase() : '';
+
+    const matchesNode = (node: any) => !compFilter || node.name.toLowerCase().includes(compFilter);
+    const nodeHasMatch = (node: any): boolean => {
+        if (matchesNode(node)) return true;
+        if (node.children) return node.children.some((child: any) => nodeHasMatch(child));
+        return false;
+    };
+
+    function createCompDetails(node: any) {
+        const details = document.createElement('div');
+        details.className = 'devtools-details';
+
+        try {
+            const deps = getComponentDeps(node.id);
+            const dev = getDevSnapshot();
+
+            const sigs = deps.signals.map(id => dev.signals.find((s: any) => s.id === id));
+            let sigHtml = '<div class="devtools-details-title">Signals</div>';
+            if (sigs.length) {
+                sigHtml += '<div class="devtools-details-list">' + sigs.map((s: any) => `${s?.name ?? 'sig#' + s.id}: ${JSON.stringify(s?.value)} (r:${s?.reads}, w:${s?.writes})`).join('<br/>') + '</div>';
+            } else {
+                sigHtml += '<div class="devtools-details-list">—</div>';
+            }
+
+            const effs = deps.effects.map(id => dev.effects.find((e: any) => e.id === id));
+            let effHtml = '<div class="devtools-details-title">Effects</div>';
+            if (effs.length) {
+                effHtml += '<div class="devtools-details-list">' + effs.map((e: any) => `effect#${e.id}: last:${e.lastRun ? new Date(e.lastRun).toLocaleTimeString() : '—'}`).join('<br/>') + '</div>';
+            } else {
+                effHtml += '<div class="devtools-details-list">—</div>';
+            }
+
+            details.innerHTML = sigHtml + effHtml;
+        } catch (err) { console.warn(err); }
+
+        const elList = getElementsForComponent(node.id);
+        const elements = document.createElement('div');
+        elements.className = 'devtools-details-title';
+        elements.textContent = 'Elements';
+        const list = document.createElement('div');
+        list.className = 'devtools-details-list';
+        list.textContent = elList.join(', ') || '—';
+        details.appendChild(elements);
+        details.appendChild(list);
+
+        return details;
+    }
+
+    function renderCompNode(node: any, container: HTMLElement, depth = 0) {
+        if (!nodeHasMatch(node)) return;
+
+        const hasChildren = Boolean(node.children && node.children.length);
+        const wrapper = hasChildren ? document.createElement('details') : document.createElement('div');
+        if (hasChildren) {
+            (wrapper as HTMLDetailsElement).open = depth < 1;
+        }
+        wrapper.className = 'devtools-tree-node';
+
+        const row = document.createElement(hasChildren ? 'summary' : 'div');
+        row.className = 'devtools-tree-row';
+        row.style.paddingLeft = `${depth * 12}px`;
+
+        const label = document.createElement('span');
         label.textContent = `${node.name} (#${node.id})`;
-        label.style.fontWeight = '600';
+        label.className = 'devtools-tree-label';
 
-        const meta = document.createElement('div');
-        meta.textContent = `${node.renders}`;
-        meta.style.opacity = '0.85';
+        const meta = document.createElement('span');
+        const updateCount = node.updates ?? 0;
+        meta.textContent = `renders ${node.renders} · updates ${updateCount}`;
+        meta.className = 'devtools-tree-meta';
 
         row.appendChild(label);
         row.appendChild(meta);
 
-        // Hover highlight for component
         row.addEventListener('mouseenter', () => highlightComponentById(node.id));
         row.addEventListener('mouseleave', () => highlightElementById(undefined));
 
-        // Click -> expand details & scroll to first element
-        row.addEventListener('click', () => {
+        const info = document.createElement('button');
+        info.type = 'button';
+        info.className = 'devtools-info';
+        info.textContent = 'i';
+        info.onclick = (event) => {
+            event.preventDefault();
+            event.stopPropagation();
             const elIds = getElementsForComponent(node.id);
             if (elIds && elIds.length) {
                 const el = getElementById(elIds[0]);
                 if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
 
-            const details = document.createElement('div');
-            details.style.fontSize = '12px';
-            details.style.marginTop = '6px';
-            details.style.paddingLeft = '6px';
+            const existing = wrapper.querySelector('.devtools-details');
+            if (existing) {
+                existing.remove();
+            } else {
+                wrapper.appendChild(createCompDetails(node));
+            }
+        };
 
-            // Component deps & detailed info
-            try {
-                const deps = getComponentDeps(node.id);
-                const dev = getDevSnapshot();
+        row.appendChild(info);
 
-                // Signals table
-                const sigs = deps.signals.map(id => dev.signals.find((s: any) => s.id === id));
-                let sigHtml = '<div style="margin-top:6px"><strong>Signals</strong></div>';
-                if (sigs.length) {
-                    sigHtml += '<div style="font-size:12px;padding-left:6px">' + sigs.map((s: any) => `${s?.name ?? 'sig#' + s.id}: ${JSON.stringify(s?.value)} (reads:${s?.reads}, writes:${s?.writes})`).join('<br/>') + '</div>';
-                } else {
-                    sigHtml += '<div style="font-size:12px;padding-left:6px">—</div>';
-                }
+        wrapper.appendChild(row);
 
-                // Effects table
-                const effs = deps.effects.map(id => dev.effects.find((e: any) => e.id === id));
-                let effHtml = '<div style="margin-top:6px"><strong>Effects</strong></div>';
-                if (effs.length) {
-                    effHtml += '<div style="font-size:12px;padding-left:6px">' + effs.map((e: any) => `effect#${e.id}: lastRun:${e.lastRun ? new Date(e.lastRun).toLocaleTimeString() : '—'}`).join('<br/>') + '</div>';
-                } else {
-                    effHtml += '<div style="font-size:12px;padding-left:6px">—</div>';
-                }
-
-                details.innerHTML = sigHtml + effHtml;
-            } catch (err) { console.warn(err); }
-
-            // Elements
-            const elList = getElementsForComponent(node.id);
-            details.innerHTML += `<div style="margin-top:6px"><strong>Elements:</strong> ${elList.join(', ') || '—'}</div>`;
-
-
-            // Remove previous details (if any) and add
-            const prev = row.nextElementSibling as HTMLElement | null;
-            if (prev && prev.classList.contains('component-details')) prev.remove();
-
-            details.classList.add('component-details');
-            row.after(details);
-        });
-
-        componentsNode!.appendChild(row);
-
-        if (node.children) {
-            for (const child of node.children) renderCompNode(child, indent + 1);
+        if (hasChildren) {
+            const childContainer = document.createElement('div');
+            childContainer.className = 'devtools-tree-children';
+            for (const child of node.children) renderCompNode(child, childContainer, depth + 1);
+            wrapper.appendChild(childContainer);
         }
+
+        container.appendChild(wrapper);
     }
 
-    for (const root of comps) renderCompNode(root, 0);
+    const treeRoot = document.createElement('div');
+    treeRoot.className = 'devtools-tree';
+    for (const root of comps) renderCompNode(root, treeRoot, 0);
+    componentsNode.appendChild(treeRoot);
 
-    // Custom Components panel (replaces raw DOM list)
-    domNode.innerHTML = '';
+    // Instances panel (grouped by component name)
+    instancesNode.innerHTML = '';
 
     const headerRow = document.createElement('div');
     headerRow.style.fontWeight = '700';
     headerRow.style.marginBottom = '6px';
     headerRow.textContent = 'Custom Components (Instances)';
-    domNode.appendChild(headerRow);
+    instancesNode.appendChild(headerRow);
 
     const instances = getComponentInstances();
     const grouped = new Map<string, any[]>();
@@ -157,96 +378,67 @@ function renderSnapshot() {
     for (const [name, arr] of grouped) {
         if (nameFilter && name.toLowerCase().indexOf(nameFilter) === -1 && !arr.some(i => String(i.id).includes(nameFilter))) continue;
 
-        const groupHeader = document.createElement('div');
-        groupHeader.style.display = 'flex';
-        groupHeader.style.justifyContent = 'space-between';
-        groupHeader.style.padding = '6px';
-        groupHeader.style.background = 'rgba(255,255,255,0.02)';
-        groupHeader.style.marginBottom = '4px';
+        const group = document.createElement('details');
+        group.className = 'devtools-tree-node';
+        group.open = true;
 
-        const left = document.createElement('div');
+        const groupHeader = document.createElement('summary');
+        groupHeader.className = 'devtools-tree-row';
+
+        const left = document.createElement('span');
         left.textContent = `${name} (${arr.length})`;
-        left.style.fontWeight = '600';
+        left.className = 'devtools-tree-label';
 
-        const right = document.createElement('div');
-        right.textContent = `renders: ${arr.reduce((s, a) => s + a.renders, 0)}`;
-        right.style.opacity = '0.85';
+        const right = document.createElement('span');
+        const totalRenders = arr.reduce((s, a) => s + a.renders, 0);
+        const totalUpdates = arr.reduce((s, a) => s + (a.updates ?? 0), 0);
+        right.textContent = `renders ${totalRenders} · updates ${totalUpdates}`;
+        right.className = 'devtools-tree-meta';
 
         groupHeader.appendChild(left);
         groupHeader.appendChild(right);
+        group.appendChild(groupHeader);
 
-        domNode.appendChild(groupHeader);
+        const list = document.createElement('div');
+        list.className = 'devtools-tree-children';
 
-        // Instances list
         for (const inst of arr) {
             const row = document.createElement('div');
-            row.style.display = 'flex';
-            row.style.justifyContent = 'space-between';
+            row.className = 'devtools-tree-row';
             row.style.paddingLeft = '12px';
-            row.style.padding = '4px 6px';
-            row.style.cursor = 'pointer';
 
-            const label = document.createElement('div');
+            const label = document.createElement('span');
             label.textContent = `#${inst.id}`;
+            label.className = 'devtools-tree-label';
 
-            const meta = document.createElement('div');
-            meta.textContent = `renders:${inst.renders}`;
-            meta.style.opacity = '0.85';
+            const meta = document.createElement('span');
+            meta.textContent = `renders ${inst.renders} · updates ${inst.updates ?? 0}`;
+            meta.className = 'devtools-tree-meta';
 
             row.appendChild(label);
             row.appendChild(meta);
 
-            // hover highlights component elements
             row.addEventListener('mouseenter', () => highlightComponentById(inst.id));
             row.addEventListener('mouseleave', () => highlightElementById(undefined));
 
-            // click expands details & jump
             row.addEventListener('click', () => {
                 const elements = getElementsForComponent(inst.id);
                 if (elements && elements.length) {
                     const el = getElementById(elements[0]);
                     if (el) {
                         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                        // toggle pinned outline
                         const pinned = el.getAttribute('data-dev-pinned') === '1';
                         if (pinned) { el.removeAttribute('data-dev-pinned'); el.classList.remove('solid-dev-pinned'); }
                         else { el.setAttribute('data-dev-pinned', '1'); el.classList.add('solid-dev-pinned'); }
                     }
                 }
-
-                // Render details below row
-                const details = document.createElement('div');
-                details.style.fontSize = '12px';
-                details.style.marginTop = '6px';
-                details.style.paddingLeft = '6px';
-
-                try {
-                    const deps = getComponentDeps(inst.id);
-                    const dev = getDevSnapshot();
-
-                    const sigs = deps.signals.map(id => dev.signals.find((s: any) => s.id === id));
-                    if (sigs.length) {
-                        details.innerHTML = '<div style="font-weight:600">Signals</div>' + sigs.map((s: any) => `<div style="padding-left:6px">${s?.name ?? 'sig#' + s.id}: ${JSON.stringify(s?.value)} (r:${s?.reads}, w:${s?.writes})</div>`).join('');
-                    } else {
-                        details.innerHTML = '<div style="font-weight:600">Signals</div><div style="padding-left:6px">—</div>';
-                    }
-
-                    const effs = deps.effects.map(id => dev.effects.find((e: any) => e.id === id));
-                    details.innerHTML += '<div style="margin-top:6px;font-weight:600">Effects</div>' + (effs.length ? '<div style="padding-left:6px">' + effs.map((e: any) => `effect#${e.id}: last:${e.lastRun ? new Date(e.lastRun).toLocaleTimeString() : '—'}`).join('<br/>') + '</div>' : '<div style="padding-left:6px">—</div>');
-                } catch (err) { console.warn(err); }
-
-                const elList = getElementsForComponent(inst.id);
-                details.innerHTML += `<div style="margin-top:6px"><strong>Elements:</strong> ${elList.join(', ') || '—'}</div>`;
-
-                // remove existing details if present
-                const next = (row.nextElementSibling as HTMLElement | null);
-                if (next && next.classList.contains('component-details')) next.remove();
-                details.classList.add('component-details');
-                row.after(details);
             });
 
-            domNode.appendChild(row);
+            list.appendChild(row);
         }
+
+        group.appendChild(list);
+        instancesNode.appendChild(group);
     }
 
 }
@@ -254,16 +446,16 @@ function renderSnapshot() {
 function createPanel() {
     panel = document.createElement('div');
     panel.style.position = 'fixed';
-    panel.style.left = '12px';
     panel.style.right = '12px';
+    panel.style.top = '72px';
     panel.style.bottom = '12px';
+    panel.style.width = '360px';
     panel.style.maxWidth = 'calc(100% - 24px)';
-    panel.style.width = 'auto';
-    panel.style.maxHeight = '60vh';
+    panel.style.maxHeight = 'calc(100% - 84px)';
     panel.style.boxSizing = 'border-box';
     panel.style.display = 'flex';
     panel.style.flexDirection = 'column';
-    panel.style.overflow = 'auto';
+    panel.style.overflow = 'hidden';
     panel.style.background = 'rgba(17,24,39,0.95)';
     panel.style.color = '#fff';
     panel.style.fontFamily = 'Menlo, monospace';
@@ -293,7 +485,7 @@ function createPanel() {
 
     const logBtn = document.createElement('button');
     logBtn.textContent = 'Log';
-    logBtn.onclick = () => console.log('Dev Snapshot', createSnapshot());
+    logBtn.onclick = () => logSnapshot();
     Object.assign(logBtn.style, { marginRight: '6px', padding: '4px 8px' });
 
     const autoBtn = document.createElement('button');
@@ -320,6 +512,10 @@ function createPanel() {
     focusPinsBtn.onclick = () => focusPinnedElement();
     Object.assign(focusPinsBtn.style, { marginRight: '6px', padding: '4px 8px' });
 
+    const collapseBtn = document.createElement('button');
+    collapseBtn.textContent = 'Collapse';
+    Object.assign(collapseBtn.style, { marginRight: '6px', padding: '4px 8px' });
+
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'Close';
     closeBtn.onclick = () => destroyPanel();
@@ -330,6 +526,7 @@ function createPanel() {
     controls.appendChild(autoBtn);
     controls.appendChild(clearPinsBtn);
     controls.appendChild(focusPinsBtn);
+    controls.appendChild(collapseBtn);
     controls.appendChild(closeBtn);
 
     header.appendChild(title);
@@ -339,16 +536,32 @@ function createPanel() {
     content.style.display = 'flex';
     content.style.flexDirection = 'column';
     content.style.gap = '8px';
+    content.style.overflow = 'auto';
+    content.style.paddingRight = '4px';
+
+    const tabs = document.createElement('div');
+    tabs.className = 'devtools-tabs';
+
+    const tabButtons = [
+        { id: 'reactivity', label: 'Reactivity' },
+        { id: 'components', label: 'Components' },
+        { id: 'instances', label: 'Instances' },
+    ].map(tab => {
+        const btn = document.createElement('button');
+        btn.textContent = tab.label;
+        btn.className = 'devtools-tab';
+        btn.setAttribute('data-tab', tab.id);
+        tabs.appendChild(btn);
+        return btn;
+    });
 
     const reactivitySection = document.createElement('div');
     reactivitySection.id = 'solid-devtools-reactivity';
-    reactivitySection.style.maxHeight = '20vh';
-    reactivitySection.style.overflow = 'auto';
+    reactivitySection.className = 'devtools-section';
 
     const componentsSection = document.createElement('div');
     componentsSection.id = 'solid-devtools-components';
-    componentsSection.style.maxHeight = '20vh';
-    componentsSection.style.overflow = 'auto';
+    componentsSection.className = 'devtools-section';
 
     const compSearch = document.createElement('input');
     compSearch.placeholder = 'Search components...';
@@ -358,26 +571,70 @@ function createPanel() {
     componentsSection.appendChild(compSearch);
     compSearchInput = compSearch;
 
-    const domSection = document.createElement('div');
-    domSection.id = 'solid-devtools-dom';
-    domSection.style.maxHeight = '20vh';
+    const instancesSection = document.createElement('div');
+    instancesSection.id = 'solid-devtools-instances';
+    instancesSection.className = 'devtools-section';
 
     const domSearch = document.createElement('input');
-    domSearch.placeholder = 'Search DOM (tag / id / event)...';
+    domSearch.placeholder = 'Search instances (name / id)...';
     domSearch.style.width = '100%';
     domSearch.style.padding = '6px';
     domSearch.style.marginBottom = '6px';
-    domSection.appendChild(domSearch);
+    instancesSection.appendChild(domSearch);
     domSearchInput = domSearch;
     // Append content sections
+    content.appendChild(tabs);
     content.appendChild(reactivitySection);
     content.appendChild(componentsSection);
-    content.appendChild(domSection);
+    content.appendChild(instancesSection);
 
     panel.appendChild(header);
     panel.appendChild(content);
 
     document.body.appendChild(panel);
+
+    if (launcher) {
+        launcher.style.display = 'none';
+    }
+
+    const setCollapsed = (next: boolean) => {
+        panelCollapsed = next;
+        if (!panel) return;
+        if (panelCollapsed) {
+            content.style.display = 'none';
+            panel.style.height = 'auto';
+            panel.style.maxHeight = 'none';
+            panel.style.width = '220px';
+            collapseBtn.textContent = 'Expand';
+        } else {
+            content.style.display = 'flex';
+            panel.style.maxHeight = 'calc(100% - 84px)';
+            panel.style.width = '360px';
+            collapseBtn.textContent = 'Collapse';
+        }
+    };
+
+    collapseBtn.onclick = () => setCollapsed(!panelCollapsed);
+    setCollapsed(false);
+
+    const setActiveTab = (tabId: string) => {
+        const sections = panel!.querySelectorAll('.devtools-section');
+        sections.forEach(section => {
+            const show = section.id === `solid-devtools-${tabId}`;
+            (section as HTMLElement).style.display = show ? 'block' : 'none';
+        });
+        tabButtons.forEach(btn => {
+            const active = btn.getAttribute('data-tab') === tabId;
+            btn.classList.toggle('devtools-tab-active', active);
+        });
+    };
+
+    tabButtons.forEach(btn => {
+        btn.onclick = () => setActiveTab(btn.getAttribute('data-tab') || 'reactivity');
+    });
+    setActiveTab('components');
+
+    injectDevtoolsUiStyle();
 
     // Create overlay for highlighting nodes
     if (!document.getElementById('solid-devtools-overlay')) {
@@ -405,6 +662,9 @@ function destroyPanel() {
         clearInterval(refreshIntervalId);
         refreshIntervalId = null;
     }
+    if (launcher) {
+        launcher.style.display = 'block';
+    }
 }
 
 function createSnapshot() {
@@ -412,6 +672,65 @@ function createSnapshot() {
         reactivity: getDevSnapshot(),
         dom: getDOMSnapshot(),
     };
+}
+
+function logSnapshot() {
+    const snapshot = createSnapshot();
+    const componentNames = new Map<number, string>();
+    getComponentInstances().forEach(instance => {
+        componentNames.set(instance.id, instance.name || 'Anonymous');
+    });
+    const signalOwners = new Map<number, string[]>();
+    for (const entry of snapshot.reactivity.components) {
+        const name = componentNames.get(entry.id) ?? `Component #${entry.id}`;
+        for (const sigId of entry.signals) {
+            const list = signalOwners.get(sigId) ?? [];
+            list.push(name);
+            signalOwners.set(sigId, list);
+        }
+    }
+
+    console.group('Velocity Devtools Snapshot');
+    console.log('Summary', {
+        enabled: snapshot.reactivity.enabled,
+        signals: snapshot.reactivity.signals.length,
+        effects: snapshot.reactivity.effects.length,
+        pendingEffects: snapshot.reactivity.pendingEffects,
+        batchDepth: snapshot.reactivity.batchDepth,
+    });
+    console.group('Signals');
+    snapshot.reactivity.signals.forEach(signal => {
+        const owners = signalOwners.get(signal.id) ?? [];
+        const inferred = owners.length ? `Signal in ${owners[0]}` : undefined;
+        const name = signal.name
+            ? `${signal.name} (#${signal.id})`
+            : inferred
+                ? `${inferred} (#${signal.id})`
+                : `signal #${signal.id}`;
+        console.log(name, {
+            reads: signal.reads,
+            writes: signal.writes,
+            value: signal.value,
+            usedBy: signalOwners.get(signal.id) ?? [],
+        });
+    });
+    console.groupEnd();
+    console.group('Effects');
+    snapshot.reactivity.effects.forEach(effect => {
+        const ownerName = effect.owner != null
+            ? (componentNames.get(effect.owner) ?? `Component #${effect.owner}`)
+            : undefined;
+        const effectLabel = effect.name || (ownerName ? `Effect in ${ownerName}` : undefined);
+        const label = effectLabel ? `${effectLabel} (#${effect.id})` : `effect #${effect.id}`;
+        console.log(label, {
+            owner: ownerName,
+            runs: effect.runs,
+            lastRun: effect.lastRun ? new Date(effect.lastRun).toLocaleTimeString() : undefined,
+            signals: effect.signals ?? [],
+        });
+    });
+    console.groupEnd();
+    console.groupEnd();
 }
 
 function highlightElementById(id: number | undefined) {
@@ -466,6 +785,40 @@ function injectHighlightStyle() {
 .solid-dev-pinned{outline:3px solid rgba(236,72,153,0.95);box-shadow:0 10px 30px rgba(236,72,153,0.12);}
 @keyframes solid-pulse{0%{box-shadow:0 6px 18px rgba(99,102,241,0.22)}100%{box-shadow:0 6px 18px rgba(99,102,241,0.02)}}
 `;
+    document.head.appendChild(s);
+}
+
+function injectDevtoolsUiStyle() {
+    if (document.getElementById('solid-devtools-ui-style')) return;
+    const s = document.createElement('style');
+    s.id = 'solid-devtools-ui-style';
+    s.textContent = `
+.devtools-tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+.devtools-tab{background:rgba(148,163,184,0.15);color:#e2e8f0;border:1px solid rgba(148,163,184,0.2);padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer;}
+.devtools-tab-active{background:rgba(99,102,241,0.35);border-color:rgba(99,102,241,0.6);color:#fff;}
+.devtools-section{display:none;}
+.devtools-section-title{font-weight:700;margin:6px 0 4px;font-size:11px;letter-spacing:.04em;text-transform:uppercase;opacity:.8;}
+.devtools-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+.devtools-summary-card{background:rgba(148,163,184,0.12);border:1px solid rgba(148,163,184,0.2);border-radius:8px;padding:6px;}
+.devtools-summary-label{font-size:10px;opacity:.7;text-transform:uppercase;letter-spacing:.04em;}
+.devtools-summary-value{font-size:12px;font-weight:700;margin-top:2px;}
+.devtools-block{margin-bottom:8px;}
+.devtools-list{display:flex;flex-direction:column;gap:4px;}
+.devtools-list-item{border-radius:8px;border:1px solid rgba(148,163,184,0.15);background:rgba(15,23,42,0.35);}
+.devtools-list-row{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;cursor:pointer;}
+.devtools-tree{display:flex;flex-direction:column;gap:2px;}
+.devtools-tree-node{margin:2px 0;border-radius:6px;}
+.devtools-tree-row{display:flex;justify-content:space-between;align-items:center;padding:4px 6px;border-radius:6px;cursor:pointer;background:rgba(148,163,184,0.08);}
+.devtools-tree-row:hover{background:rgba(148,163,184,0.16);}
+.devtools-tree-label{font-weight:600;}
+.devtools-tree-meta{opacity:.7;font-size:11px;}
+.devtools-info{margin-left:8px;background:rgba(148,163,184,0.2);border:1px solid rgba(148,163,184,0.3);color:#e2e8f0;border-radius:6px;padding:0 6px;font-size:10px;cursor:pointer;}
+.devtools-info:hover{background:rgba(148,163,184,0.35);}
+.devtools-tree-children{display:flex;flex-direction:column;gap:2px;margin-top:2px;}
+.devtools-details{margin:6px 0 6px 12px;padding:6px;border:1px solid rgba(148,163,184,0.2);border-radius:6px;background:rgba(15,23,42,0.35);}
+.devtools-details-title{font-weight:600;margin-top:4px;}
+.devtools-details-list{opacity:0.9;padding-left:6px;font-size:11px;}
+    `;
     document.head.appendChild(s);
 }
 
@@ -525,6 +878,8 @@ export function installDevtools({ autoOpen = true, autoEnableInDev = true, highl
         renderSnapshot();
     }
 
+    ensureLauncher();
+
     if (autoBindSelector) {
         attachSnapshotLogger(autoBindSelector);
     }
@@ -537,4 +892,34 @@ function devtoolsExists() {
 
 export function uninstallDevtools() {
     destroyPanel();
+}
+
+function ensureLauncher() {
+    if (launcher || !devtoolsExists()) return;
+    launcher = document.createElement('button');
+    launcher.textContent = 'Devtools';
+    Object.assign(launcher.style, {
+        position: 'fixed',
+        right: '16px',
+        bottom: '16px',
+        zIndex: '999998',
+        padding: '8px 12px',
+        borderRadius: '999px',
+        border: '1px solid rgba(148,163,184,0.3)',
+        background: 'rgba(15,23,42,0.9)',
+        color: '#fff',
+        cursor: 'pointer',
+        fontSize: '12px',
+        boxShadow: '0 6px 14px rgba(15,23,42,0.35)',
+    });
+    launcher.onclick = () => {
+        if (!panel) {
+            createPanel();
+            renderSnapshot();
+        }
+    };
+    document.body.appendChild(launcher);
+    if (panel) {
+        launcher.style.display = 'none';
+    }
 }
