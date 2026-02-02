@@ -88,6 +88,7 @@ const StyleManager = {
             .replace(/,/g, '\\,');
 
         let rule = '';
+        // Only force important if user explicitly requested it with '!'
         const important = className.startsWith('!') ? ' !important' : '';
         const body = `{ ${prop}: ${value}${important}; }`;
 
@@ -95,6 +96,8 @@ const StyleManager = {
             case 'hover': rule = `.${selector}:hover ${body}`; break;
             case 'focus': rule = `.${selector}:focus ${body}`; break;
             case 'active': rule = `.${selector}:active ${body}`; break;
+            // Support for dark mode (descendant or self) - higher specificity than base class
+            case 'dark': rule = `.dark .${selector}, [data-theme="dark"] .${selector}, .dark.${selector}, [data-theme="dark"].${selector} ${body}`; break;
             case 'sm': rule = `@media (min-width: 640px) { .${selector} ${body} }`; break;
             case 'md': rule = `@media (min-width: 768px) { .${selector} ${body} }`; break;
             case 'lg': rule = `@media (min-width: 1024px) { .${selector} ${body} }`; break;
@@ -330,19 +333,12 @@ const TailwindEngine = {
             }
 
             if (utilityStyle) {
-                if (modifier) {
-                    // Inject into stylesheet
-                    for (const [prop, val] of Object.entries(utilityStyle)) {
-                        StyleManager.inject(token, prop, val as string, modifier);
-                    }
-                    classes.push(token);
-                } else {
-                    // Standard inline style
-                    if (important) {
-                        for (const k in utilityStyle) utilityStyle[k] += ' !important';
-                    }
-                    Object.assign(style, utilityStyle);
+                // Inject everything into stylesheet to ensure proper specificity
+                // modifiers > base styles order usually handles it, but CSS order matters too.
+                for (const [prop, val] of Object.entries(utilityStyle)) {
+                    StyleManager.inject(token, prop, val as string, modifier);
                 }
+                classes.push(token);
             } else {
                 // Unknown class, just pass it through
                 classes.push(token);
