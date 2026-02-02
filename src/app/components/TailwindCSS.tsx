@@ -249,27 +249,45 @@ const TailwindEngine: {
     }
 };
 
-// Types for DynamicTailwind component
-type DynamicTailwindProps = {
-    class?: string | (() => string);
-    children?: any;
-    as?: string;
-    style?: Record<string, any>;
-} & Record<string, any>;
+// Helpers
+export function tw(classString: string) {
+    return TailwindEngine.toStyles(classString || '');
+}
 
-// Velocity component
-const DynamicTailwind: FC<DynamicTailwindProps> = (props) => {
-    const { class: classString, children, as: Component = 'div', style, ...rest } = props as DynamicTailwindProps;
-    const Elem = Component as any;
-    const classGetter = () => typeof classString === 'function' ? classString() : (classString || '');
-    const styleProp = typeof classString === 'function'
-        ? () => ({ ...TailwindEngine.toStyles(classString()), ...style })
-        : { ...TailwindEngine.toStyles(String(classString || '')), ...style };
-    return <Elem class={classGetter} style={styleProp as any} {...rest}>{children}</Elem>;
-};
+export function twReactive(getClass: () => string) {
+    return () => TailwindEngine.toStyles(getClass() || '');
+}
+
+export function installTailwind() {
+    const orig = (globalThis as any).createElement as Function | undefined;
+    if (!orig || (orig as any).__twInstalled) return;
+
+    const wrapper = function (tag: any, props: any, ...children: any[]) {
+        if (props) {
+            const cls = props.class ?? props.className;
+            if (cls && props.style == null) {
+                if (typeof cls === 'function') {
+                    // reactive class getter -> reactive style getter
+                    props = { ...props, style: () => TailwindEngine.toStyles(cls()) };
+                } else {
+                    props = { ...props, style: TailwindEngine.toStyles(String(cls)) };
+                }
+            }
+        }
+        return orig(tag, props, ...children);
+    } as any;
+
+    (wrapper as any).__twInstalled = true;
+    (globalThis as any).createElement = wrapper;
+}
+
+// Auto-install when imported (convenience)
+if (typeof globalThis !== 'undefined' && (globalThis as any).createElement) {
+    installTailwind();
+}
 
 // Demo
-export default function App() {
+export default function App(): any {
     const [config, setConfig] = createSignal({ spacing: 4, color: 'blue-500', size: 'base', rounded: 'lg' });
 
     return (
@@ -281,85 +299,30 @@ export default function App() {
                 Dynamically evaluate any Tailwind class at runtime
             </p>
 
-            <DynamicTailwind class="bg-gray-50 p-6 rounded-xl mb-6">
-                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>Controls</h2>
-
-                <DynamicTailwind class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
-                            {() => `Padding: p-${config().spacing}`}
-                        </label>
-                        <input type="range" min="0" max="16" value={() => config().spacing}
-                            onChange={(e: any) => setConfig(prev => ({ ...prev, spacing: parseInt(e.target.value) || 0 }))}
-                            style={{ width: '100%' }} />
+            <section class="card">
+                <h3>Usage Examples</h3>
+                <div class="list">
+                    <div class="row gap">
+                        <div style={{ minWidth: '160px' }}><strong>Native class</strong></div>
+                        <div class={() => `pill p-3 bg-${config().color} text-white rounded`}>Native element</div>
                     </div>
 
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Color</label>
-                        <select value={() => config().color} onChange={(e: any) => setConfig(prev => ({ ...prev, color: e.target.value }))}
-                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
-                            {['blue-500', 'red-500', 'green-500', 'purple-500', 'amber-500', 'cyan-500'].map(c =>
-                                <option key={c} value={c}>{c}</option>
-                            )}
-                        </select>
+                    <div class="row gap">
+                        <div style={{ minWidth: '160px' }}><strong>tw helper</strong></div>
+                        <div style={tw(`p-${config().spacing} bg-${config().color} text-white rounded`)} class="muted">Style via tw()</div>
                     </div>
 
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Text Size</label>
-                        <select value={() => config().size} onChange={(e: any) => setConfig(prev => ({ ...prev, size: e.target.value }))}
-                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
-                            {['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'].map(s =>
-                                <option key={s} value={s}>{s}</option>
-                            )}
-                        </select>
+                    <div class="row gap">
+                        <div style={{ minWidth: '160px' }}><strong>twReactive</strong></div>
+                        <div style={twReactive(() => `p-${config().spacing} bg-${config().color} text-white rounded`)} class="muted">Reactive styles</div>
                     </div>
 
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Border Radius</label>
-                        <select value={() => config().rounded} onChange={(e: any) => setConfig(prev => ({ ...prev, rounded: e.target.value }))}
-                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
-                            {['none', 'sm', 'md', 'lg', 'xl', '2xl', 'full'].map(r =>
-                                <option key={r} value={r}>{r}</option>
-                            )}
-                        </select>
+                    <div class="row gap">
+                        <div style={{ minWidth: '160px' }}><strong>Reactive class</strong></div>
+                        <div class={() => `p-${config().spacing} bg-${config().color} text-white rounded`}>Reactive class</div>
                     </div>
-                </DynamicTailwind>
-
-                <DynamicTailwind class="mt-4 p-3 bg-slate-900 rounded-lg font-mono text-sm text-white">
-                    {() => `className=\"p-${config().spacing} bg-${config().color} text-white rounded-${config().rounded} text-${config().size}\"`}
-                </DynamicTailwind>
-            </DynamicTailwind>
-
-            <DynamicTailwind class={() => `p-${config().spacing} bg-${config().color} text-white rounded-${config().rounded} text-${config().size} mb-6`}>
-                <h3 style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Dynamic Tailwind Element</h3>
-                <p>This element uses dynamically generated classes evaluated at runtime!</p>
-            </DynamicTailwind>
-
-            <DynamicTailwind class="grid grid-cols-3 gap-4 mb-6">
-                <DynamicTailwind class="p-6 bg-blue-500 text-white rounded-lg shadow-lg text-center font-semibold">
-                    Blue Card
-                </DynamicTailwind>
-                <DynamicTailwind class="p-6 bg-purple-600 text-white rounded-xl shadow-xl text-center font-bold">
-                    Purple Card
-                </DynamicTailwind>
-                <DynamicTailwind class="p-6 bg-emerald-500 text-white rounded-2xl shadow-2xl text-center font-extrabold">
-                    Emerald Card
-                </DynamicTailwind>
-            </DynamicTailwind>
-
-            <DynamicTailwind class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
-                <h3 style={{ fontWeight: '600', marginBottom: '0.5rem' }}>Supported Features</h3>
-                <ul style={{ paddingLeft: '1.5rem', lineHeight: '1.75' }}>
-                    <li>Full Tailwind color palette (50-950 shades)</li>
-                    <li>All spacing utilities (padding, margin, gap, width, height)</li>
-                    <li>Flexbox & Grid layouts</li>
-                    <li>Typography (font size, weight, alignment, transforms)</li>
-                    <li>Borders (width, radius, colors)</li>
-                    <li>Shadows, opacity, transitions</li>
-                    <li>Display, position, overflow utilities</li>
-                    <li>And much more!</li>
-                </ul>
-            </DynamicTailwind>
+                </div>
+            </section>
         </div>
     );
 }
