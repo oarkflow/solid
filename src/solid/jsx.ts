@@ -265,14 +265,6 @@ export function createElement(
     props: Props | null,
     ...children: any[]
 ): JSX.Element {
-    // Function component
-    if (typeof tag === 'function') {
-        return untrack(() => tag({
-            ...props,
-            children: children.length === 1 ? children[0] : children.length ? children : props?.children,
-        }));
-    }
-
     // If this is a function component, create an instance entry & manage stack
     if (typeof tag === 'function') {
         const instanceId = ++componentInstanceCounter;
