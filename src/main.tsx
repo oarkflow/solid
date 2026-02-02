@@ -1,62 +1,284 @@
-import { createSignal, render, createElement, type FC } from './solid';
+import {
+    createSignal,
+    render,
+    createElement,
+    type FC,
+    createMemo,
+    createStore,
+    createActions,
+    createRouter
+} from './solid';
 import './index.css';
 
-const Demo: FC = () => {
-    const [count, setCount] = createSignal(0);
-    const [text, setText] = createSignal('Hello');
-    const [color, setColor] = createSignal('#007bff');
+type AuthState = {
+    user: { name: string; role: 'user' | 'admin' } | null;
+    token: string;
+    lastLogin: string | null;
+};
+
+type AppState = {
+    counter: number;
+    preferences: {
+        theme: 'light' | 'dark';
+        accent: string;
+    };
+    flags: {
+        secureMode: boolean;
+        betaAccess: boolean;
+    };
+    activity: string[];
+};
+
+const authStore = createStore<AuthState>(
+    {
+        user: null,
+        token: '',
+        lastLogin: null,
+    },
+    { storageKey: 'solid-auth', version: 1 }
+);
+
+const appStore = createStore<AppState>(
+    {
+        counter: 0,
+        preferences: {
+            theme: 'light',
+            accent: '#4f46e5',
+        },
+        flags: {
+            secureMode: true,
+            betaAccess: false,
+        },
+        activity: [],
+    },
+    { storageKey: 'solid-app', version: 1 }
+);
+
+const authActions = createActions(authStore, (set, get, patch) => ({
+    login: (name: string) => {
+        const token = typeof crypto !== 'undefined' && 'randomUUID' in crypto
+            ? crypto.randomUUID()
+            : Math.random().toString(36).slice(2);
+        patch({
+            user: { name, role: 'user' },
+            token,
+            lastLogin: new Date().toISOString(),
+        });
+    },
+    logout: () => {
+        patch({ user: null, token: '', lastLogin: null });
+    },
+}));
+
+const addActivity = (message: string) => {
+    appStore.patch(prev => ({
+        activity: [`${new Date().toLocaleTimeString()} • ${message}`, ...prev.activity].slice(0, 6),
+    }));
+};
+
+const isAuthenticated = createMemo(() => Boolean(authStore.state().token));
+const userName = authStore.select(state => state.user?.name ?? 'Guest');
+const theme = appStore.select(state => state.preferences.theme);
+const accent = appStore.select(state => state.preferences.accent);
+const counter = appStore.select(state => state.counter);
+
+const Home: FC = () => (
+    <section class="card">
+        <h2>Reactive Store</h2>
+        <p class="muted">State is persisted and fully reactive.</p>
+
+        <div class="row gap">
+            <button class="button" onClick={() => appStore.patch(prev => ({ counter: prev.counter + 1 }))}>
+                Increment ({counter})
+            </button>
+            <button class="button ghost" onClick={() => appStore.patch(prev => ({ counter: Math.max(0, prev.counter - 1) }))}>
+                Decrement
+            </button>
+        </div>
+
+        <div class="row gap">
+            <button
+                class="button ghost"
+                onClick={() => {
+                    appStore.update(['preferences', 'theme'], theme() === 'light' ? 'dark' : 'light');
+                    addActivity('Theme toggled');
+                }}
+            >
+                Toggle Theme ({theme})
+            </button>
+            <input
+                class="color"
+                type="color"
+                value={accent}
+                onChange={(event: any) => {
+                    appStore.update(['preferences', 'accent'], event.target.value);
+                    addActivity('Accent updated');
+                }}
+            />
+        </div>
+    </section>
+);
+
+const Login: FC = () => {
+    const [name, setName] = createSignal('');
+    const { navigate } = useRouter();
 
     return (
-        <div>
-            <header style={{ background: color(), padding: '20px', color: 'white' }}>
-                <h1>Complete DOM Framework</h1>
-            </header>
+        <section class="card">
+            <h2>Secure Login</h2>
+            <p class="muted">Protected routes require a valid session.</p>
 
-            <main style={{ padding: '20px' }}>
-                <section>
-                    <h2>Interactive Elements</h2>
-
-                    <button onClick={() => setCount(count() + 1)}>Count: {count}</button>
-
-                    <div style={{ margin: '20px 0' }}>
-                        <input
-                            type="text"
-                            value={text}
-                            onInput={(e: any) => setText(e.target.value)}
-                            placeholder="Enter text..."
-                        />
-                        <input
-                            type="color"
-                            value={color}
-                            onChange={(e: any) => setColor(e.target.value)}
-                        />
-                    </div>
-
-                    <p>Current text: <strong>{text}</strong></p>
-                    <p>Count: <em>{count}</em></p>
-
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Property</th>
-                                <th>Value</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr>
-                                <td>Count</td>
-                                <td>{count}</td>
-                            </tr>
-                            <tr>
-                                <td>Text</td>
-                                <td>{text}</td>
-                            </tr>
-                        </tbody>
-                    </table>
-                </section>
-            </main>
-        </div>
+            <div class="row gap">
+                <input
+                    class="input"
+                    type="text"
+                    placeholder="Enter name"
+                    value={name}
+                    onInput={(event: any) => setName(event.target.value)}
+                />
+                <button
+                    class="button"
+                    onClick={() => {
+                        if (!name().trim()) return;
+                        authActions.login(name().trim());
+                        addActivity('Signed in');
+                        navigate('/dashboard');
+                    }}
+                >
+                    Sign In
+                </button>
+            </div>
+        </section>
     );
 };
 
-render(<Demo />, document.getElementById('root')!);
+const Dashboard: FC = () => (
+    <section class="card">
+        <h2>Protected Dashboard</h2>
+        <p class="muted">Only authenticated users can access this view.</p>
+        <div class="list">
+            <div><strong>User:</strong> {userName}</div>
+            <div><strong>Last login:</strong> {() => authStore.state().lastLogin ?? '—'}</div>
+            <div><strong>Secure mode:</strong> {() => appStore.state().flags.secureMode ? 'Enabled' : 'Disabled'}</div>
+        </div>
+    </section>
+);
+
+const Settings: FC = () => (
+    <section class="card">
+        <h2>Security Controls</h2>
+        <p class="muted">Fine-grained flags stored in reactive state.</p>
+        <div class="row gap">
+            <button
+                class="button ghost"
+                onClick={() => {
+                    appStore.update(['flags', 'secureMode'], !appStore.state().flags.secureMode);
+                    addActivity('Secure mode toggled');
+                }}
+            >
+                Secure Mode: {() => (appStore.state().flags.secureMode ? 'On' : 'Off')}
+            </button>
+            <button
+                class="button ghost"
+                onClick={() => {
+                    appStore.update(['flags', 'betaAccess'], !appStore.state().flags.betaAccess);
+                    addActivity('Beta access toggled');
+                }}
+            >
+                Beta Access: {() => (appStore.state().flags.betaAccess ? 'On' : 'Off')}
+            </button>
+        </div>
+    </section>
+);
+
+const Profile: FC = () => {
+    const { params } = useRouter();
+    return (
+        <section class="card">
+            <h2>Profile</h2>
+            <p class="muted">Dynamic route with parameters.</p>
+            <div><strong>Profile name:</strong> {() => params().name || 'unknown'}</div>
+        </section>
+    );
+};
+
+const Activity: FC = () => (
+    <section class="card">
+        <h2>Recent Activity</h2>
+        <div class="list">
+            {() => appStore.state().activity.length
+                ? appStore.state().activity.map(entry => <div class="muted">{entry}</div>)
+                : <div class="muted">No activity yet.</div>
+            }
+        </div>
+    </section>
+);
+
+const NotFound: FC = () => (
+    <section class="card">
+        <h2>Route not found</h2>
+        <p class="muted">The requested page does not exist.</p>
+    </section>
+);
+
+const routes = [
+    { path: '/', component: Home },
+    { path: '/login', component: Login },
+    { path: '/dashboard', component: Dashboard, guard: () => isAuthenticated(), redirectTo: '/login' },
+    { path: '/settings', component: Settings, guard: () => isAuthenticated(), redirectTo: '/login' },
+    { path: '/profile/:name', component: Profile, guard: () => isAuthenticated(), redirectTo: '/login' },
+    { path: '*', component: NotFound },
+];
+
+const { Router, Link, useRouter } = createRouter(routes, {
+    notFound: NotFound,
+    onBlocked: () => addActivity('Blocked unsafe navigation'),
+});
+
+const App: FC = () => (
+    <div class="app" data-theme={theme} style={() => ({ '--accent': accent() } as any)}>
+        <header class="topbar">
+            <div class="brand">Secure Reactive Suite</div>
+            <nav class="nav">
+                <Link to="/" class="nav-link" activeClass="active">Home</Link>
+                <Link to="/dashboard" class="nav-link" activeClass="active">Dashboard</Link>
+                <Link to="/settings" class="nav-link" activeClass="active">Settings</Link>
+                <Link to="/profile/ava" class="nav-link" activeClass="active">Profile</Link>
+            </nav>
+            <div class="session">
+                <span class="pill">{userName}</span>
+                <button
+                    class="button small"
+                    onClick={() => {
+                        if (isAuthenticated()) {
+                            authActions.logout();
+                            addActivity('Signed out');
+                        } else {
+                            addActivity('Navigate to sign in');
+                        }
+                    }}
+                >
+                    {() => isAuthenticated() ? 'Sign Out' : 'Guest Mode'}
+                </button>
+            </div>
+        </header>
+
+        <main class="grid">
+            <div class="stack">
+                <Router />
+            </div>
+            <aside class="stack">
+                <Activity />
+                <section class="card">
+                    <h2>Session Status</h2>
+                    <div class="list">
+                        <div><strong>Authenticated:</strong> {() => isAuthenticated() ? 'Yes' : 'No'}</div>
+                        <div><strong>Token:</strong> {() => authStore.state().token ? authStore.state().token.slice(0, 8) + '…' : '—'}</div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+    </div>
+);
+
+render(<App />, document.getElementById('root')!);
