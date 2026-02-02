@@ -1,5 +1,5 @@
 import { enableDevtools, getDevSnapshot, getComponentDeps } from './reactivity';
-import { getDOMSnapshot, getElementById, getComponentsTree, getElementsForComponent } from './jsx';
+import { getDOMSnapshot, getElementById, getComponentsTree, getElementsForComponent, getComponentInstances } from './jsx';
 
 // Search inputs (accessible from renderSnapshot)
 let compSearchInput: HTMLInputElement | null = null;
@@ -86,15 +86,36 @@ function renderSnapshot() {
             details.style.marginTop = '6px';
             details.style.paddingLeft = '6px';
 
-            // Component deps
+            // Component deps & detailed info
             try {
                 const deps = getComponentDeps(node.id);
-                details.innerHTML = `<div>Signals: ${deps.signals.join(', ') || '—'}</div><div>Effects: ${deps.effects.join(', ') || '—'}</div>`;
-            } catch { /* ignore */ }
+                const dev = getDevSnapshot();
+
+                // Signals table
+                const sigs = deps.signals.map(id => dev.signals.find((s: any) => s.id === id));
+                let sigHtml = '<div style="margin-top:6px"><strong>Signals</strong></div>';
+                if (sigs.length) {
+                    sigHtml += '<div style="font-size:12px;padding-left:6px">' + sigs.map((s: any) => `${s?.name ?? 'sig#' + s.id}: ${JSON.stringify(s?.value)} (reads:${s?.reads}, writes:${s?.writes})`).join('<br/>') + '</div>';
+                } else {
+                    sigHtml += '<div style="font-size:12px;padding-left:6px">—</div>';
+                }
+
+                // Effects table
+                const effs = deps.effects.map(id => dev.effects.find((e: any) => e.id === id));
+                let effHtml = '<div style="margin-top:6px"><strong>Effects</strong></div>';
+                if (effs.length) {
+                    effHtml += '<div style="font-size:12px;padding-left:6px">' + effs.map((e: any) => `effect#${e.id}: lastRun:${e.lastRun ? new Date(e.lastRun).toLocaleTimeString() : '—'}`).join('<br/>') + '</div>';
+                } else {
+                    effHtml += '<div style="font-size:12px;padding-left:6px">—</div>';
+                }
+
+                details.innerHTML = sigHtml + effHtml;
+            } catch (err) { console.warn(err); }
 
             // Elements
             const elList = getElementsForComponent(node.id);
-            details.innerHTML += `<div>Elements: ${elList.join(', ') || '—'}</div>`;
+            details.innerHTML += `<div style="margin-top:6px"><strong>Elements:</strong> ${elList.join(', ') || '—'}</div>`;
+
 
             // Remove previous details (if any) and add
             const prev = row.nextElementSibling as HTMLElement | null;
@@ -113,69 +134,121 @@ function renderSnapshot() {
 
     for (const root of comps) renderCompNode(root, 0);
 
-    // DOM
+    // Custom Components panel (replaces raw DOM list)
     domNode.innerHTML = '';
-    const list = document.createElement('div');
-    list.style.display = 'grid';
-    list.style.gridTemplateColumns = '1fr 80px 60px';
-    list.style.gap = '4px 8px';
-    list.style.alignItems = 'center';
 
     const headerRow = document.createElement('div');
     headerRow.style.fontWeight = '700';
-    headerRow.style.gridColumn = '1 / -1';
-    headerRow.textContent = 'DOM Nodes';
+    headerRow.style.marginBottom = '6px';
+    headerRow.textContent = 'Custom Components (Instances)';
     domNode.appendChild(headerRow);
 
-    const domFilter = (domSearchInput && domSearchInput.value) ? domSearchInput.value.toLowerCase() : '';
-    for (const item of snapshot.dom) {
-        // apply filter
-        if (domFilter) {
-            const matchesTag = item.tag.toLowerCase().includes(domFilter);
-            const matchesId = String(item.id).includes(domFilter);
-            const matchesEvents = item.events.join(', ').toLowerCase().includes(domFilter);
-            if (!(matchesTag || matchesId || matchesEvents)) continue;
-        }
-
-        const rowTag = document.createElement('div');
-        rowTag.textContent = `${item.tag} #${item.id}`;
-        rowTag.style.cursor = 'pointer';
-
-        const rowEvents = document.createElement('div');
-        rowEvents.textContent = item.events.join(', ');
-        rowEvents.style.opacity = '0.8';
-
-        const rowUpdates = document.createElement('div');
-        rowUpdates.textContent = String(item.updates);
-        rowUpdates.style.textAlign = 'right';
-
-        const container = document.createElement('div');
-        container.style.display = 'contents';
-        container.appendChild(rowTag);
-        container.appendChild(rowEvents);
-        container.appendChild(rowUpdates);
-
-        rowTag.addEventListener('mouseenter', () => highlightElementById(item.id));
-        rowTag.addEventListener('mouseleave', () => highlightElementById(undefined));
-        rowEvents.addEventListener('mouseenter', () => highlightElementById(item.id));
-        rowEvents.addEventListener('mouseleave', () => highlightElementById(undefined));
-        rowUpdates.addEventListener('mouseenter', () => highlightElementById(item.id));
-        rowUpdates.addEventListener('mouseleave', () => highlightElementById(undefined));
-
-        // click -> scroll into view and permanent highlight
-        rowTag.addEventListener('click', () => {
-            const el = getElementById(item.id);
-            if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                el.classList.add('solid-dev-updated');
-                setTimeout(() => el.classList.remove('solid-dev-updated'), 1200);
-            }
-        });
-
-        list.appendChild(container);
+    const instances = getComponentInstances();
+    const grouped = new Map<string, any[]>();
+    for (const inst of instances) {
+        const name = inst.name || 'Anonymous';
+        const arr = grouped.get(name) || [];
+        arr.push(inst);
+        grouped.set(name, arr);
     }
 
-    domNode.appendChild(list);
+    const nameFilter = (domSearchInput && domSearchInput.value) ? domSearchInput.value.toLowerCase() : '';
+
+    for (const [name, arr] of grouped) {
+        if (nameFilter && name.toLowerCase().indexOf(nameFilter) === -1 && !arr.some(i => String(i.id).includes(nameFilter))) continue;
+
+        const groupHeader = document.createElement('div');
+        groupHeader.style.display = 'flex';
+        groupHeader.style.justifyContent = 'space-between';
+        groupHeader.style.padding = '6px';
+        groupHeader.style.background = 'rgba(255,255,255,0.02)';
+        groupHeader.style.marginBottom = '4px';
+
+        const left = document.createElement('div');
+        left.textContent = `${name} (${arr.length})`;
+        left.style.fontWeight = '600';
+
+        const right = document.createElement('div');
+        right.textContent = `renders: ${arr.reduce((s, a) => s + a.renders, 0)}`;
+        right.style.opacity = '0.85';
+
+        groupHeader.appendChild(left);
+        groupHeader.appendChild(right);
+
+        domNode.appendChild(groupHeader);
+
+        // Instances list
+        for (const inst of arr) {
+            const row = document.createElement('div');
+            row.style.display = 'flex';
+            row.style.justifyContent = 'space-between';
+            row.style.paddingLeft = '12px';
+            row.style.padding = '4px 6px';
+            row.style.cursor = 'pointer';
+
+            const label = document.createElement('div');
+            label.textContent = `#${inst.id}`;
+
+            const meta = document.createElement('div');
+            meta.textContent = `renders:${inst.renders}`;
+            meta.style.opacity = '0.85';
+
+            row.appendChild(label);
+            row.appendChild(meta);
+
+            // hover highlights component elements
+            row.addEventListener('mouseenter', () => highlightComponentById(inst.id));
+            row.addEventListener('mouseleave', () => highlightElementById(undefined));
+
+            // click expands details & jump
+            row.addEventListener('click', () => {
+                const elements = getElementsForComponent(inst.id);
+                if (elements && elements.length) {
+                    const el = getElementById(elements[0]);
+                    if (el) {
+                        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        // toggle pinned outline
+                        const pinned = el.getAttribute('data-dev-pinned') === '1';
+                        if (pinned) { el.removeAttribute('data-dev-pinned'); el.classList.remove('solid-dev-pinned'); }
+                        else { el.setAttribute('data-dev-pinned', '1'); el.classList.add('solid-dev-pinned'); }
+                    }
+                }
+
+                // Render details below row
+                const details = document.createElement('div');
+                details.style.fontSize = '12px';
+                details.style.marginTop = '6px';
+                details.style.paddingLeft = '6px';
+
+                try {
+                    const deps = getComponentDeps(inst.id);
+                    const dev = getDevSnapshot();
+
+                    const sigs = deps.signals.map(id => dev.signals.find((s: any) => s.id === id));
+                    if (sigs.length) {
+                        details.innerHTML = '<div style="font-weight:600">Signals</div>' + sigs.map((s: any) => `<div style="padding-left:6px">${s?.name ?? 'sig#' + s.id}: ${JSON.stringify(s?.value)} (r:${s?.reads}, w:${s?.writes})</div>`).join('');
+                    } else {
+                        details.innerHTML = '<div style="font-weight:600">Signals</div><div style="padding-left:6px">—</div>';
+                    }
+
+                    const effs = deps.effects.map(id => dev.effects.find((e: any) => e.id === id));
+                    details.innerHTML += '<div style="margin-top:6px;font-weight:600">Effects</div>' + (effs.length ? '<div style="padding-left:6px">' + effs.map((e: any) => `effect#${e.id}: last:${e.lastRun ? new Date(e.lastRun).toLocaleTimeString() : '—'}`).join('<br/>') + '</div>' : '<div style="padding-left:6px">—</div>');
+                } catch (err) { console.warn(err); }
+
+                const elList = getElementsForComponent(inst.id);
+                details.innerHTML += `<div style="margin-top:6px"><strong>Elements:</strong> ${elList.join(', ') || '—'}</div>`;
+
+                // remove existing details if present
+                const next = (row.nextElementSibling as HTMLElement | null);
+                if (next && next.classList.contains('component-details')) next.remove();
+                details.classList.add('component-details');
+                row.after(details);
+            });
+
+            domNode.appendChild(row);
+        }
+    }
+
 }
 
 function createPanel() {
@@ -237,6 +310,16 @@ function createPanel() {
     };
     Object.assign(autoBtn.style, { marginRight: '6px', padding: '4px 8px', opacity: '0.6' });
 
+    const clearPinsBtn = document.createElement('button');
+    clearPinsBtn.textContent = 'Clear Pins';
+    clearPinsBtn.onclick = () => clearAllPins();
+    Object.assign(clearPinsBtn.style, { marginRight: '6px', padding: '4px 8px' });
+
+    const focusPinsBtn = document.createElement('button');
+    focusPinsBtn.textContent = 'Focus Pins';
+    focusPinsBtn.onclick = () => focusPinnedElement();
+    Object.assign(focusPinsBtn.style, { marginRight: '6px', padding: '4px 8px' });
+
     const closeBtn = document.createElement('button');
     closeBtn.textContent = 'Close';
     closeBtn.onclick = () => destroyPanel();
@@ -245,6 +328,8 @@ function createPanel() {
     controls.appendChild(refreshBtn);
     controls.appendChild(logBtn);
     controls.appendChild(autoBtn);
+    controls.appendChild(clearPinsBtn);
+    controls.appendChild(focusPinsBtn);
     controls.appendChild(closeBtn);
 
     header.appendChild(title);
@@ -378,9 +463,33 @@ function injectHighlightStyle() {
     s.id = 'solid-devtools-style';
     s.textContent = `
 .solid-dev-updated{outline: 2px solid rgba(99,102,241,0.95);box-shadow:0 6px 18px rgba(99,102,241,0.12);transition:box-shadow .35s ease,outline .35s ease;animation:solid-pulse .9s ease}
+.solid-dev-pinned{outline:3px solid rgba(236,72,153,0.95);box-shadow:0 10px 30px rgba(236,72,153,0.12);}
 @keyframes solid-pulse{0%{box-shadow:0 6px 18px rgba(99,102,241,0.22)}100%{box-shadow:0 6px 18px rgba(99,102,241,0.02)}}
 `;
     document.head.appendChild(s);
+}
+
+/**
+ * Clear all pinned elements from the page (remove outline and attribute)
+ */
+function clearAllPins() {
+    const pinned = document.querySelectorAll('[data-dev-pinned="1"]');
+    pinned.forEach((el: Element) => {
+        el.removeAttribute('data-dev-pinned');
+        (el as HTMLElement).classList.remove('solid-dev-pinned');
+    });
+    renderSnapshot();
+}
+
+/**
+ * Focus the first pinned element (scroll into view and flash highlight)
+ */
+function focusPinnedElement() {
+    const el = document.querySelector('[data-dev-pinned="1"]') as HTMLElement | null;
+    if (!el) return;
+    try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }); } catch { }
+    el.classList.add('solid-dev-updated');
+    setTimeout(() => el.classList.remove('solid-dev-updated'), 900);
 }
 
 /**

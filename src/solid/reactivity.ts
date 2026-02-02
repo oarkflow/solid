@@ -26,7 +26,7 @@ let pendingEffects: Set<Effect> = new Set();
 // ============================================================================
 
 type DevEffectMeta = { id: number; runs: number; lastRun?: number };
-type DevSignalMeta = { id: number; reads: number; writes: number };
+type DevSignalMeta = { id: number; reads: number; writes: number; name?: string; getValue?: () => any };
 
 const devState = {
     enabled: false,
@@ -44,6 +44,10 @@ const devSignalsRegistry = new Map<Set<Effect>, DevSignalMeta>();
 const devComponentSignals = new Map<number, Set<number>>();
 const devComponentEffects = new Map<number, Set<number>>();
 
+// Effect -> signals mapping and effect ownership
+const devEffectSignals = new Map<number, Set<number>>();
+const devEffectOwner = new Map<number, number | undefined>();
+
 
 export function enableDevtools() {
     devState.enabled = true;
@@ -54,14 +58,16 @@ export function disableDevtools() {
 }
 
 export function getDevSnapshot() {
-    const effects: Array<{ id: number; runs: number; lastRun?: number }> = [];
+    const effects: Array<{ id: number; runs: number; lastRun?: number; signals?: number[]; owner?: number | undefined }> = [];
     for (const meta of devEffectsRegistry.values()) {
-        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun });
+        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun, signals: [...(devEffectSignals.get(meta.id) ?? [])], owner: devEffectOwner.get(meta.id) });
     }
 
-    const signals: Array<{ id: number; reads: number; writes: number }> = [];
+    const signals: Array<{ id: number; name?: string; reads: number; writes: number; value?: any }> = [];
     for (const meta of devSignalsRegistry.values()) {
-        signals.push({ id: meta.id, reads: meta.reads, writes: meta.writes });
+        let current: any = undefined;
+        try { current = meta.getValue ? meta.getValue() : undefined; } catch { }
+        signals.push({ id: meta.id, name: meta.name, reads: meta.reads, writes: meta.writes, value: current });
     }
 
     // Component mappings (signals/effects)
@@ -102,13 +108,13 @@ export function getComponentDeps(componentId: number) {
  */
 export function createSignal<T>(
     initialValue: T,
-    options?: { equals?: false | ((prev: T, next: T) => boolean) }
+    options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
 ): [() => T, (value: T | ((prev: T) => T)) => void] {
     let value = initialValue;
     const subscribers = new Set<Effect>();
 
     // Register signal metadata for devtools
-    const signalMeta: DevSignalMeta = { id: ++devState.signalCounter, reads: 0, writes: 0 };
+    const signalMeta: DevSignalMeta = { id: ++devState.signalCounter, reads: 0, writes: 0, name: options?.name, getValue: () => value };
     devState.signals.set(subscribers, signalMeta);
     devSignalsRegistry.set(subscribers, signalMeta);
 
@@ -126,16 +132,42 @@ export function createSignal<T>(
             const meta = devState.signals.get(subscribers);
             if (meta) meta.reads++;
 
-            // If there is a current component executing, map component -> signal
-            const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-            if (compId != null && devSignalsRegistry.has(subscribers)) {
-                const sigMeta = devSignalsRegistry.get(subscribers)!;
-                let set = devComponentSignals.get(compId);
-                if (!set) {
-                    set = new Set();
-                    devComponentSignals.set(compId, set);
+            // Attribute read to current effect (if any)
+            if (currentEffect) {
+                const effMeta = devState.effects.get(currentEffect) || devEffectsRegistry.get(currentEffect);
+                if (effMeta) {
+                    let set = devEffectSignals.get(effMeta.id);
+                    if (!set) {
+                        set = new Set();
+                        devEffectSignals.set(effMeta.id, set);
+                    }
+                    if (meta) {
+                        set.add(meta.id);
+
+                        // If effect is owned by a component, attach signal to component as well
+                        const owner = devEffectOwner.get(effMeta.id);
+                        if (owner != null) {
+                            let cs = devComponentSignals.get(owner);
+                            if (!cs) {
+                                cs = new Set();
+                                devComponentSignals.set(owner, cs);
+                            }
+                            cs.add(meta.id);
+                        }
+                    }
                 }
-                set.add(sigMeta.id);
+            } else {
+                // If there is a current component executing directly, map component -> signal
+                const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+                if (compId != null && devSignalsRegistry.has(subscribers)) {
+                    const sigMeta = devSignalsRegistry.get(subscribers)!;
+                    let set = devComponentSignals.get(compId);
+                    if (!set) {
+                        set = new Set();
+                        devComponentSignals.set(compId, set);
+                    }
+                    set.add(sigMeta.id);
+                }
             }
         }
         return value;
@@ -230,10 +262,25 @@ export function createEffect(fn: () => void): void {
         cleanups: [],
     };
 
-    // Dev meta
+    // Dev meta and ownership
     const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0 };
     devState.effects.set(effect, meta);
     devEffectsRegistry.set(effect, meta);
+
+    // If a component is currently executing, mark this effect as owned by it
+    const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
+    if (compId != null) {
+        devEffectOwner.set(meta.id, compId);
+        let set = devComponentEffects.get(compId);
+        if (!set) {
+            set = new Set();
+            devComponentEffects.set(compId, set);
+        }
+        set.add(meta.id);
+    }
+
+    // Ensure there is an entry for effect->signals
+    devEffectSignals.set(meta.id, new Set());
 
     // Run immediately
     runEffect(effect);

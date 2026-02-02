@@ -276,7 +276,7 @@ export function createElement(
     // If this is a function component, create an instance entry & manage stack
     if (typeof tag === 'function') {
         const instanceId = ++componentInstanceCounter;
-        const name = (tag as any).name || 'Anonymous';
+        const name = (tag as any).displayName || (tag as any).name || 'Anonymous';
         const parentId = componentStack.length ? componentStack[componentStack.length - 1] : null;
         const meta: any = { id: instanceId, name, func: tag, renders: 0, lastRender: undefined, parentId, children: new Set<number>() };
         componentInstances.set(instanceId, meta);
@@ -287,6 +287,8 @@ export function createElement(
 
         // push instance, run component, and pop
         componentStack.push(instanceId);
+        const prev = (globalThis as any).__CURRENT_COMPONENT_ID;
+        (globalThis as any).__CURRENT_COMPONENT_ID = instanceId;
         try {
             meta.renders++;
             meta.lastRender = Date.now();
@@ -294,6 +296,7 @@ export function createElement(
             return res as JSX.Element;
         } finally {
             componentStack.pop();
+            (globalThis as any).__CURRENT_COMPONENT_ID = prev;
         }
     }
 
