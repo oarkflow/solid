@@ -1,0 +1,365 @@
+import { createSignal, type FC } from '@/velocity';
+
+// Comprehensive Tailwind CSS Engine
+type ColorValue = string | Record<string, string>;
+
+const TailwindEngine: {
+    colors: Record<string, ColorValue>;
+    spacing: (v: string) => string;
+    parseClass: (className: string) => Record<string, any>;
+    toStyles: (classString: string) => Record<string, any>;
+    getColor: (str: string) => string | null;
+} = {
+    // Tailwind color palette
+    colors: {
+        transparent: 'transparent', current: 'currentColor', black: '#000', white: '#fff',
+        slate: { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8', 500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a', 950: '#020617' },
+        gray: { 50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db', 400: '#9ca3af', 500: '#6b7280', 600: '#4b5563', 700: '#374151', 800: '#1f2937', 900: '#111827', 950: '#030712' },
+        zinc: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7', 300: '#d4d4d8', 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b', 950: '#09090b' },
+        neutral: { 50: '#fafafa', 100: '#f5f5f5', 200: '#e5e5e5', 300: '#d4d4d4', 400: '#a3a3a3', 500: '#737373', 600: '#525252', 700: '#404040', 800: '#262626', 900: '#171717', 950: '#0a0a0a' },
+        stone: { 50: '#fafaf9', 100: '#f5f5f4', 200: '#e7e5e4', 300: '#d6d3d1', 400: '#a8a29e', 500: '#78716c', 600: '#57534e', 700: '#44403c', 800: '#292524', 900: '#1c1917', 950: '#0c0a09' },
+        red: { 50: '#fef2f2', 100: '#fee2e2', 200: '#fecaca', 300: '#fca5a5', 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c', 800: '#991b1b', 900: '#7f1d1d', 950: '#450a0a' },
+        orange: { 50: '#fff7ed', 100: '#ffedd5', 200: '#fed7aa', 300: '#fdba74', 400: '#fb923c', 500: '#f97316', 600: '#ea580c', 700: '#c2410c', 800: '#9a3412', 900: '#7c2d12', 950: '#431407' },
+        amber: { 50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f', 950: '#451a03' },
+        yellow: { 50: '#fefce8', 100: '#fef9c3', 200: '#fef08a', 300: '#fde047', 400: '#facc15', 500: '#eab308', 600: '#ca8a04', 700: '#a16207', 800: '#854d0e', 900: '#713f12', 950: '#422006' },
+        lime: { 50: '#f7fee7', 100: '#ecfccb', 200: '#d9f99d', 300: '#bef264', 400: '#a3e635', 500: '#84cc16', 600: '#65a30d', 700: '#4d7c0f', 800: '#3f6212', 900: '#365314', 950: '#1a2e05' },
+        green: { 50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac', 400: '#4ade80', 500: '#22c55e', 600: '#16a34a', 700: '#15803d', 800: '#166534', 900: '#14532d', 950: '#052e16' },
+        emerald: { 50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857', 800: '#065f46', 900: '#064e3b', 950: '#022c22' },
+        teal: { 50: '#f0fdfa', 100: '#ccfbf1', 200: '#99f6e4', 300: '#5eead4', 400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488', 700: '#0f766e', 800: '#115e59', 900: '#134e4a', 950: '#042f2e' },
+        cyan: { 50: '#ecfeff', 100: '#cffafe', 200: '#a5f3fc', 300: '#67e8f9', 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2', 700: '#0e7490', 800: '#155e75', 900: '#164e63', 950: '#083344' },
+        sky: { 50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd', 300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 800: '#075985', 900: '#0c4a6e', 950: '#082f49' },
+        blue: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a', 950: '#172554' },
+        indigo: { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81', 950: '#1e1b4b' },
+        violet: { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9', 800: '#5b21b6', 900: '#4c1d95', 950: '#2e1065' },
+        purple: { 50: '#faf5ff', 100: '#f3e8ff', 200: '#e9d5ff', 300: '#d8b4fe', 400: '#c084fc', 500: '#a855f7', 600: '#9333ea', 700: '#7e22ce', 800: '#6b21a8', 900: '#581c87', 950: '#3b0764' },
+        fuchsia: { 50: '#fdf4ff', 100: '#fae8ff', 200: '#f5d0fe', 300: '#f0abfc', 400: '#e879f9', 500: '#d946ef', 600: '#c026d3', 700: '#a21caf', 800: '#86198f', 900: '#701a75', 950: '#4a044e' },
+        pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843', 950: '#500724' },
+        rose: { 50: '#fff1f2', 100: '#ffe4e6', 200: '#fecdd3', 300: '#fda4af', 400: '#fb7185', 500: '#f43f5e', 600: '#e11d48', 700: '#be123c', 800: '#9f1239', 900: '#881337', 950: '#4c0519' }
+    },
+
+    getColor(str: string) {
+        if (!str) return null;
+        const colors = this.colors as Record<string, ColorValue>;
+        if (colors[str] && typeof colors[str] === 'string') return colors[str] as string;
+        const [color, shade] = str.split('-');
+        const maybe = colors[color] as Record<string, string> | string | undefined;
+        if (maybe && typeof maybe !== 'string' && maybe[shade]) return maybe[shade];
+        if (str.startsWith('#') || str.startsWith('rgb')) return str;
+        return null;
+    },
+
+    spacing(v: string) {
+        const map = {
+            '0': '0', 'px': '1px', '0.5': '0.125rem', '1': '0.25rem', '1.5': '0.375rem', '2': '0.5rem', '2.5': '0.625rem',
+            '3': '0.75rem', '3.5': '0.875rem', '4': '1rem', '5': '1.25rem', '6': '1.5rem', '7': '1.75rem', '8': '2rem',
+            '9': '2.25rem', '10': '2.5rem', '11': '2.75rem', '12': '3rem', '14': '3.5rem', '16': '4rem', '20': '5rem',
+            '24': '6rem', '28': '7rem', '32': '8rem', '36': '9rem', '40': '10rem', '44': '11rem', '48': '12rem',
+            '52': '13rem', '56': '14rem', '60': '15rem', '64': '16rem', '72': '18rem', '80': '20rem', '96': '24rem',
+            'auto': 'auto', 'full': '100%', 'screen': '100vw', 'min': 'min-content', 'max': 'max-content', 'fit': 'fit-content'
+        };
+        const m = map as Record<string, string>;
+        return m[v] || (v.startsWith('[') ? v.slice(1, -1).replace(/_/g, ' ') : v);
+    },
+
+    parseClass(className: string) {
+        // Static utilities
+        const statics = {
+            // Display
+            block: { display: 'block' }, 'inline-block': { display: 'inline-block' }, inline: { display: 'inline' },
+            flex: { display: 'flex' }, 'inline-flex': { display: 'inline-flex' }, grid: { display: 'grid' },
+            hidden: { display: 'none' }, table: { display: 'table' },
+
+            // Position
+            static: { position: 'static' }, fixed: { position: 'fixed' }, absolute: { position: 'absolute' },
+            relative: { position: 'relative' }, sticky: { position: 'sticky' },
+
+            // Overflow
+            'overflow-auto': { overflow: 'auto' }, 'overflow-hidden': { overflow: 'hidden' },
+            'overflow-scroll': { overflow: 'scroll' }, 'overflow-x-auto': { overflowX: 'auto' },
+            'overflow-y-auto': { overflowY: 'auto' }, 'overflow-x-hidden': { overflowX: 'hidden' },
+
+            // Flex
+            'flex-row': { flexDirection: 'row' }, 'flex-col': { flexDirection: 'column' },
+            'flex-wrap': { flexWrap: 'wrap' }, 'flex-nowrap': { flexWrap: 'nowrap' },
+            'flex-1': { flex: '1 1 0%' }, 'flex-auto': { flex: '1 1 auto' }, 'flex-none': { flex: 'none' },
+            'flex-grow': { flexGrow: 1 }, 'flex-shrink': { flexShrink: 1 }, 'flex-shrink-0': { flexShrink: 0 },
+
+            // Justify & Align
+            'justify-start': { justifyContent: 'flex-start' }, 'justify-end': { justifyContent: 'flex-end' },
+            'justify-center': { justifyContent: 'center' }, 'justify-between': { justifyContent: 'space-between' },
+            'justify-around': { justifyContent: 'space-around' }, 'justify-evenly': { justifyContent: 'space-evenly' },
+            'items-start': { alignItems: 'flex-start' }, 'items-end': { alignItems: 'flex-end' },
+            'items-center': { alignItems: 'center' }, 'items-baseline': { alignItems: 'baseline' },
+            'items-stretch': { alignItems: 'stretch' }, 'self-center': { alignSelf: 'center' },
+
+            // Font
+            'font-sans': { fontFamily: 'ui-sans-serif, system-ui, sans-serif' },
+            'font-serif': { fontFamily: 'ui-serif, Georgia, serif' },
+            'font-mono': { fontFamily: 'ui-monospace, monospace' },
+            'font-thin': { fontWeight: '100' }, 'font-light': { fontWeight: '300' },
+            'font-normal': { fontWeight: '400' }, 'font-medium': { fontWeight: '500' },
+            'font-semibold': { fontWeight: '600' }, 'font-bold': { fontWeight: '700' },
+            'font-extrabold': { fontWeight: '800' }, 'font-black': { fontWeight: '900' },
+
+            // Text
+            'text-left': { textAlign: 'left' }, 'text-center': { textAlign: 'center' },
+            'text-right': { textAlign: 'right' }, 'text-justify': { textAlign: 'justify' },
+            underline: { textDecoration: 'underline' }, 'line-through': { textDecoration: 'line-through' },
+            'no-underline': { textDecoration: 'none' },
+            uppercase: { textTransform: 'uppercase' }, lowercase: { textTransform: 'lowercase' },
+            capitalize: { textTransform: 'capitalize' }, 'normal-case': { textTransform: 'none' },
+            'whitespace-nowrap': { whiteSpace: 'nowrap' }, 'whitespace-pre': { whiteSpace: 'pre' },
+            'break-words': { overflowWrap: 'break-word' }, 'break-all': { wordBreak: 'break-all' },
+
+            // Cursor
+            'cursor-pointer': { cursor: 'pointer' }, 'cursor-default': { cursor: 'default' },
+            'cursor-not-allowed': { cursor: 'not-allowed' }, 'cursor-wait': { cursor: 'wait' },
+
+            // Misc
+            'pointer-events-none': { pointerEvents: 'none' }, 'select-none': { userSelect: 'none' },
+            'select-text': { userSelect: 'text' },
+
+            // Shadows
+            'shadow-sm': { boxShadow: '0 1px 2px 0 rgb(0 0 0 / 0.05)' },
+            shadow: { boxShadow: '0 1px 3px 0 rgb(0 0 0 / 0.1)' },
+            'shadow-md': { boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' },
+            'shadow-lg': { boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' },
+            'shadow-xl': { boxShadow: '0 20px 25px -5px rgb(0 0 0 / 0.1)' },
+            'shadow-none': { boxShadow: 'none' },
+
+            // Transition
+            transition: { transitionProperty: 'all', transitionDuration: '150ms', transitionTimingFunction: 'ease-in-out' },
+            'transition-colors': { transitionProperty: 'color, background-color, border-color', transitionDuration: '150ms' },
+            'ease-in': { transitionTimingFunction: 'cubic-bezier(0.4, 0, 1, 1)' },
+            'ease-out': { transitionTimingFunction: 'cubic-bezier(0, 0, 0.2, 1)' },
+
+            // Grid
+            'grid-cols-1': { gridTemplateColumns: 'repeat(1, minmax(0, 1fr))' },
+            'grid-cols-2': { gridTemplateColumns: 'repeat(2, minmax(0, 1fr))' },
+            'grid-cols-3': { gridTemplateColumns: 'repeat(3, minmax(0, 1fr))' },
+            'grid-cols-4': { gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' },
+            'grid-cols-6': { gridTemplateColumns: 'repeat(6, minmax(0, 1fr))' },
+            'grid-cols-12': { gridTemplateColumns: 'repeat(12, minmax(0, 1fr))' },
+        };
+
+        const stat = statics as Record<string, Record<string, any>>;
+        if (stat[className]) return stat[className];
+
+        // Dynamic utilities
+        const match = className.match(/^([a-z-]+?)-(.+)$/);
+        if (!match) return {};
+
+        const [, prefix, value] = match;
+
+        // Spacing
+        if (['p', 'px', 'py', 'pt', 'pr', 'pb', 'pl', 'm', 'mx', 'my', 'mt', 'mr', 'mb', 'ml'].includes(prefix)) {
+            const prop = { p: 'padding', m: 'margin' }[prefix[0]] as string;
+            const dirs = { x: ['Left', 'Right'], y: ['Top', 'Bottom'], t: ['Top'], r: ['Right'], b: ['Bottom'], l: ['Left'] } as Record<string, string[]>;
+            const sides = prefix[1] ? dirs[prefix[1]] : [''];
+            return Object.fromEntries((sides as string[]).map((s: string) => [prop + s, this.spacing(value)]));
+        }
+
+        // Width & Height
+        if (prefix === 'w' || prefix === 'h') {
+            const prop = prefix === 'w' ? 'width' : 'height';
+            const fracs = { '1/2': '50%', '1/3': '33.333%', '2/3': '66.667%', '1/4': '25%', '3/4': '75%' } as Record<string, string>;
+            return { [prop]: fracs[value] || this.spacing(value) };
+        }
+
+        // Min/Max
+        if (['min-w', 'max-w', 'min-h', 'max-h'].includes(prefix)) {
+            const [type, dim] = prefix.split('-');
+            const prop = (type === 'min' ? 'min' : 'max') + (dim === 'w' ? 'Width' : 'Height');
+            const maxW = { xs: '20rem', sm: '24rem', md: '28rem', lg: '32rem', xl: '36rem', '2xl': '42rem', '4xl': '56rem' } as Record<string, string>;
+            return { [prop]: (prefix === 'max-w' && maxW[value]) || this.spacing(value) };
+        }
+
+        // Gap
+        if (prefix === 'gap' || prefix === 'gap-x' || prefix === 'gap-y') {
+            const prop = prefix === 'gap-x' ? 'columnGap' : prefix === 'gap-y' ? 'rowGap' : 'gap';
+            return { [prop]: this.spacing(value) };
+        }
+
+        // Border width
+        if (['border', 'border-t', 'border-r', 'border-b', 'border-l', 'border-x', 'border-y'].includes(prefix)) {
+            const w = value || '1';
+            if (prefix === 'border') return { borderWidth: w + 'px' };
+            const sides = { t: ['Top'], r: ['Right'], b: ['Bottom'], l: ['Left'], x: ['Left', 'Right'], y: ['Top', 'Bottom'] } as Record<string, string[]>;
+            const chosen = sides[prefix.split('-')[1]] || [];
+            return Object.fromEntries((chosen as string[]).map((s: string) => [`border${s}Width`, w + 'px']));
+        }
+
+        // Border radius
+        if (prefix.startsWith('rounded')) {
+            const sizes = { none: '0', sm: '0.125rem', md: '0.375rem', lg: '0.5rem', xl: '0.75rem', '2xl': '1rem', full: '9999px' } as Record<string, string>;
+            const r = sizes[value] || '0.25rem';
+            if (prefix === 'rounded') return { borderRadius: r };
+            const corners = { t: ['TopLeft', 'TopRight'], r: ['TopRight', 'BottomRight'], b: ['BottomLeft', 'BottomRight'], l: ['TopLeft', 'BottomLeft'] } as Record<string, string[]>;
+            const side = prefix.split('-')[1];
+            const chosenCorners = corners[side] || [];
+            return Object.fromEntries((chosenCorners as string[]).map((c: string) => [`border${c}Radius`, r]));
+        }
+
+        // Text size
+        if (prefix === 'text') {
+            const sizes = { xs: '0.75rem', sm: '0.875rem', base: '1rem', lg: '1.125rem', xl: '1.25rem', '2xl': '1.5rem', '3xl': '1.875rem', '4xl': '2.25rem', '5xl': '3rem', '6xl': '3.75rem' } as Record<string, string>;
+            if (sizes[value]) return { fontSize: sizes[value] };
+            const color = this.getColor(value);
+            if (color) return { color };
+        }
+
+        // Background & Border colors
+        if (prefix === 'bg' || prefix === 'border') {
+            const color = this.getColor(value);
+            return color ? { [prefix === 'bg' ? 'backgroundColor' : 'borderColor']: color } : {};
+        }
+
+        // Opacity
+        if (prefix === 'opacity') return { opacity: parseInt(value) / 100 };
+
+        // Z-index
+        if (prefix === 'z') return { zIndex: value };
+
+        // Top/Right/Bottom/Left
+        if (['top', 'right', 'bottom', 'left'].includes(prefix)) {
+            return { [prefix]: this.spacing(value) };
+        }
+
+        // Duration
+        if (prefix === 'duration') return { transitionDuration: value + 'ms' };
+
+        // Line height & Letter spacing
+        if (prefix === 'leading') {
+            const heights = { none: '1', tight: '1.25', snug: '1.375', normal: '1.5', relaxed: '1.625', loose: '2' } as Record<string, string>;
+            return { lineHeight: heights[value] || value };
+        }
+        if (prefix === 'tracking') {
+            const spacing = { tighter: '-0.05em', tight: '-0.025em', normal: '0', wide: '0.025em', wider: '0.05em', widest: '0.1em' } as Record<string, string>;
+            return { letterSpacing: spacing[value] || value };
+        }
+
+        return {};
+    },
+
+    toStyles(classString: string) {
+        if (!classString) return {};
+        return classString.trim().split(/\s+/).reduce((acc, cls) => {
+            return { ...acc, ...this.parseClass(cls) };
+        }, {});
+    }
+};
+
+// Types for DynamicTailwind component
+type DynamicTailwindProps = {
+    class?: string | (() => string);
+    children?: any;
+    as?: string;
+    style?: Record<string, any>;
+} & Record<string, any>;
+
+// Velocity component
+const DynamicTailwind: FC<DynamicTailwindProps> = (props) => {
+    const { class: classString, children, as: Component = 'div', style, ...rest } = props as DynamicTailwindProps;
+    const Elem = Component as any;
+    const classGetter = () => typeof classString === 'function' ? classString() : (classString || '');
+    const styleProp = typeof classString === 'function'
+        ? () => ({ ...TailwindEngine.toStyles(classString()), ...style })
+        : { ...TailwindEngine.toStyles(String(classString || '')), ...style };
+    return <Elem class={classGetter} style={styleProp as any} {...rest}>{children}</Elem>;
+};
+
+// Demo
+export default function App() {
+    const [config, setConfig] = createSignal({ spacing: 4, color: 'blue-500', size: 'base', rounded: 'lg' });
+
+    return (
+        <div style={{ padding: '2rem', fontFamily: 'system-ui', maxWidth: '1200px', margin: '0 auto' }}>
+            <h1 style={{ fontSize: '2.5rem', fontWeight: 'bold', marginBottom: '1rem' }}>
+                Complete Tailwind CSS Engine
+            </h1>
+            <p style={{ color: '#6b7280', marginBottom: '2rem' }}>
+                Dynamically evaluate any Tailwind class at runtime
+            </p>
+
+            <DynamicTailwind class="bg-gray-50 p-6 rounded-xl mb-6">
+                <h2 style={{ fontSize: '1.25rem', fontWeight: '600', marginBottom: '1rem' }}>Controls</h2>
+
+                <DynamicTailwind class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>
+                            {() => `Padding: p-${config().spacing}`}
+                        </label>
+                        <input type="range" min="0" max="16" value={() => config().spacing}
+                            onChange={(e: any) => setConfig(prev => ({ ...prev, spacing: parseInt(e.target.value) || 0 }))}
+                            style={{ width: '100%' }} />
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Color</label>
+                        <select value={() => config().color} onChange={(e: any) => setConfig(prev => ({ ...prev, color: e.target.value }))}
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
+                            {['blue-500', 'red-500', 'green-500', 'purple-500', 'amber-500', 'cyan-500'].map(c =>
+                                <option key={c} value={c}>{c}</option>
+                            )}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Text Size</label>
+                        <select value={() => config().size} onChange={(e: any) => setConfig(prev => ({ ...prev, size: e.target.value }))}
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
+                            {['xs', 'sm', 'base', 'lg', 'xl', '2xl', '3xl'].map(s =>
+                                <option key={s} value={s}>{s}</option>
+                            )}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: '500' }}>Border Radius</label>
+                        <select value={() => config().rounded} onChange={(e: any) => setConfig(prev => ({ ...prev, rounded: e.target.value }))}
+                            style={{ width: '100%', padding: '0.5rem', borderRadius: '0.375rem', border: '1px solid #d1d5db' }}>
+                            {['none', 'sm', 'md', 'lg', 'xl', '2xl', 'full'].map(r =>
+                                <option key={r} value={r}>{r}</option>
+                            )}
+                        </select>
+                    </div>
+                </DynamicTailwind>
+
+                <DynamicTailwind class="mt-4 p-3 bg-slate-900 rounded-lg font-mono text-sm text-white">
+                    {() => `className=\"p-${config().spacing} bg-${config().color} text-white rounded-${config().rounded} text-${config().size}\"`}
+                </DynamicTailwind>
+            </DynamicTailwind>
+
+            <DynamicTailwind class={() => `p-${config().spacing} bg-${config().color} text-white rounded-${config().rounded} text-${config().size} mb-6`}>
+                <h3 style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Dynamic Tailwind Element</h3>
+                <p>This element uses dynamically generated classes evaluated at runtime!</p>
+            </DynamicTailwind>
+
+            <DynamicTailwind class="grid grid-cols-3 gap-4 mb-6">
+                <DynamicTailwind class="p-6 bg-blue-500 text-white rounded-lg shadow-lg text-center font-semibold">
+                    Blue Card
+                </DynamicTailwind>
+                <DynamicTailwind class="p-6 bg-purple-600 text-white rounded-xl shadow-xl text-center font-bold">
+                    Purple Card
+                </DynamicTailwind>
+                <DynamicTailwind class="p-6 bg-emerald-500 text-white rounded-2xl shadow-2xl text-center font-extrabold">
+                    Emerald Card
+                </DynamicTailwind>
+            </DynamicTailwind>
+
+            <DynamicTailwind class="bg-indigo-50 border-l-4 border-indigo-500 p-4 rounded">
+                <h3 style={{ fontWeight: '600', marginBottom: '0.5rem' }}>Supported Features</h3>
+                <ul style={{ paddingLeft: '1.5rem', lineHeight: '1.75' }}>
+                    <li>Full Tailwind color palette (50-950 shades)</li>
+                    <li>All spacing utilities (padding, margin, gap, width, height)</li>
+                    <li>Flexbox & Grid layouts</li>
+                    <li>Typography (font size, weight, alignment, transforms)</li>
+                    <li>Borders (width, radius, colors)</li>
+                    <li>Shadows, opacity, transitions</li>
+                    <li>Display, position, overflow utilities</li>
+                    <li>And much more!</li>
+                </ul>
+            </DynamicTailwind>
+        </div>
+    );
+}

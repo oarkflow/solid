@@ -225,6 +225,13 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
             } else if (value instanceof Node) {
                 parent.insertBefore(value, marker.nextSibling);
                 nodes.push(value);
+                // ensure element ownership is correct for inserted nodes
+                if (value.nodeType === 1) {
+                    const el = value as Element;
+                    const meta = elementRegistry.get(el);
+                    const compId = componentStack.length ? componentStack[componentStack.length - 1] : undefined;
+                    if (meta && (meta.componentId == null)) meta.componentId = compId;
+                }
             } else if (Array.isArray(value)) {
                 const flat = value.flat(Infinity);
                 let ref: Node | null = marker.nextSibling;
@@ -233,6 +240,12 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
                     if (v instanceof Node) {
                         parent.insertBefore(v, ref);
                         nodes.push(v);
+                        if (v.nodeType === 1) {
+                            const el = v as Element;
+                            const meta = elementRegistry.get(el);
+                            const compId = componentStack.length ? componentStack[componentStack.length - 1] : undefined;
+                            if (meta && (meta.componentId == null)) meta.componentId = compId;
+                        }
                     } else {
                         const text = document.createTextNode(String(v));
                         parent.insertBefore(text, ref);

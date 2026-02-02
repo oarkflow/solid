@@ -4,6 +4,7 @@ import type { createElement as _createElement, Fragment as _Fragment } from './j
 declare global {
     const createElement: typeof _createElement;
     const Fragment: typeof _Fragment;
+
 }
 
 export { };

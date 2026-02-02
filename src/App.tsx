@@ -13,6 +13,7 @@ const NotFoundPage = lazy(() => import('@/app/pages/NotFound').then(m => ({ defa
 import { Header } from '@/app/components/layout/Header';
 import { Sidebar } from '@/app/components/layout/Sidebar';
 import { Loading } from '@/app/components/layout/Loading';
+import TailwindApp from '@/app/components/TailwindCSS';
 
 import { isAuthenticated } from '@/app/stores/auth';
 import { theme, accent, addActivity } from '@/app/stores/app';
@@ -131,6 +132,7 @@ export const App: FC = () => (
         <main class="grid">
             <div class="stack">
                 <Router fallback={<Loading />} />
+                <TailwindApp />
             </div>
             <Sidebar />
         </main>
