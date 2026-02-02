@@ -104,7 +104,15 @@ export type {
 // ============================================================================
 
 export { createRouter } from './router';
-export type { Route, RouterApi } from './router';
+export type {
+    Route,
+    RouterApi,
+    Middleware,
+    RouteMeta,
+    RouteMetaInput,
+    MetaTagDescriptor,
+    HeadConfig,
+} from './router';
 
 // ============================================================================
 // JSX Factory (for TypeScript/Babel)

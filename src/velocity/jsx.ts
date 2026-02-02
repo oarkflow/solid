@@ -517,7 +517,7 @@ export function render(
 }
 
 // ============================================================================
-// JSX Types
+// JSX Types & Global Setup
 // ============================================================================
 
 declare global {
@@ -536,3 +536,9 @@ declare global {
 }
 
 export type { JSX };
+
+// Make createElement and Fragment available globally for JSX
+if (typeof globalThis !== 'undefined') {
+    (globalThis as any).createElement = createElement;
+    (globalThis as any).Fragment = Fragment;
+}

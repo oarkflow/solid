@@ -1,11 +1,12 @@
 import { createEffect, createMemo, createSignal, batch, untrack, onCleanup } from './reactivity';
+import { createStorage } from './storage';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export type StoreOptions<T> = {
-    /** Key for localStorage persistence */
+    /** Key for secure storage persistence */
     storageKey?: string;
     /** Version for migrations */
     version?: number;
@@ -55,9 +56,6 @@ type Path<T> = T extends object
 // Utilities
 // ============================================================================
 
-/**
- * Deep clone with structured clone or JSON fallback
- */
 function cloneDeep<T>(value: T): T {
     if (value === null || typeof value !== 'object') {
         return value;
@@ -81,9 +79,6 @@ function cloneDeep<T>(value: T): T {
     }
 }
 
-/**
- * Deep equality check
- */
 function deepEqual(a: unknown, b: unknown): boolean {
     if (a === b) return true;
     if (a == null || b == null) return a === b;
@@ -102,21 +97,6 @@ function deepEqual(a: unknown, b: unknown): boolean {
     return true;
 }
 
-/**
- * Parse JSON safely
- */
-function safeParseJSON(value: string | null): unknown | null {
-    if (!value) return null;
-    try {
-        return JSON.parse(value);
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Get nested value by path
- */
 function getByPath(obj: any, path: string): any {
     const keys = path.split('.');
     let current = obj;
@@ -129,9 +109,6 @@ function getByPath(obj: any, path: string): any {
     return current;
 }
 
-/**
- * Set nested value by path (immutably)
- */
 function setByPath<T>(obj: T, path: string, value: unknown): T {
     const keys = path.split('.');
 
@@ -154,34 +131,10 @@ function setByPath<T>(obj: T, path: string, value: unknown): T {
     return clone as T;
 }
 
-/**
- * Deep freeze object (for immutability in dev)
- */
-function deepFreeze<T>(obj: T): T {
-    if (typeof obj !== 'object' || obj === null) return obj;
-
-    Object.freeze(obj);
-
-    for (const key of Object.keys(obj)) {
-        const value = (obj as any)[key];
-        if (typeof value === 'object' && value !== null && !Object.isFrozen(value)) {
-            deepFreeze(value);
-        }
-    }
-
-    return obj;
-}
-
 // ============================================================================
 // Store Creation
 // ============================================================================
 
-/**
- * Create a reactive store with fine-grained updates
- *
- * @param initial - Initial state
- * @param options - Store configuration options
- */
 export function createStore<T extends object>(
     initial: T,
     options?: StoreOptions<T>
@@ -190,16 +143,13 @@ export function createStore<T extends object>(
     const equals = options?.equals ?? deepEqual;
     const middleware = options?.middleware ?? [];
 
-    // Core signal
     const [state, setSignal] = createSignal<T>(
         cloneDeep(initial),
-        { equals: false } // We handle equality ourselves for fine-grained control
+        { equals: false }
     );
 
-    // Subscribers for external listeners
     const subscribers = new Set<(state: T) => void>();
 
-    // Apply middleware chain
     const applyMiddleware = (prev: T, next: T, action: string): T => {
         let result = next;
         for (const mw of middleware) {
@@ -211,7 +161,6 @@ export function createStore<T extends object>(
         return result;
     };
 
-    // Core setState implementation
     const setState: StoreApi<T>['setState'] = (next) => {
         batch(() => {
             const prev = state();
@@ -224,7 +173,6 @@ export function createStore<T extends object>(
             const finalState = applyMiddleware(prev, nextState, 'setState');
             setSignal(finalState);
 
-            // Notify subscribers
             for (const listener of subscribers) {
                 listener(finalState);
             }
@@ -232,16 +180,23 @@ export function createStore<T extends object>(
     };
 
     // Load from storage
-    if (options?.storageKey && typeof localStorage !== 'undefined') {
+    if (options?.storageKey) {
+        const storage = createStorage<{ version?: number; state?: T } | null>({
+            key: options.storageKey,
+            encrypt: true,
+            encryptionKey: 'default-key-change-in-production',
+            defaultValue: null
+        });
+
         try {
-            const raw = safeParseJSON(localStorage.getItem(options.storageKey));
-            if (raw && typeof raw === 'object') {
-                const stored = raw as { version?: number; state?: T };
-                if (stored.state) {
-                    if (options.version && stored.version !== options.version && options.migrate) {
-                        setState(options.migrate(stored.state, stored.version));
+            const stored = storage.get();
+            if (stored && typeof stored === 'object') {
+                const data = stored as { version?: number; state?: T };
+                if (data.state) {
+                    if (options.version && data.version !== options.version && options.migrate) {
+                        setState(options.migrate(data.state, data.version));
                     } else {
-                        setState(stored.state);
+                        setState(data.state);
                     }
                 }
             }
@@ -249,7 +204,6 @@ export function createStore<T extends object>(
             console.warn('[Store] Failed to load from storage:', e);
         }
 
-        // Persist on changes
         createEffect(() => {
             const currentState = state();
             try {
@@ -258,14 +212,13 @@ export function createStore<T extends object>(
                     state: currentState,
                     timestamp: Date.now(),
                 };
-                localStorage.setItem(options.storageKey!, JSON.stringify(payload));
+                storage.set(payload);
             } catch (e) {
                 console.warn('[Store] Failed to persist to storage:', e);
             }
         });
     }
 
-    // Patch - merge partial state
     const patch: StoreApi<T>['patch'] = (partial) => {
         setState(prev => {
             const nextPatch = typeof partial === 'function' ? partial(prev) : partial;
@@ -274,7 +227,6 @@ export function createStore<T extends object>(
         });
     };
 
-    // Update by path
     const update: StoreApi<T>['update'] = (path, value) => {
         setState(prev => {
             const currentValue = getByPath(prev, path as string);
@@ -285,12 +237,10 @@ export function createStore<T extends object>(
         });
     };
 
-    // Reset to initial
     const reset: StoreApi<T>['reset'] = () => {
         setState(cloneDeep(initialSnapshot));
     };
 
-    // Create derived selector with memoization
     const select: StoreApi<T>['select'] = <U,>(
         selector: (state: T) => U,
         selectorEquals: (a: U, b: U) => boolean = Object.is
@@ -298,13 +248,11 @@ export function createStore<T extends object>(
         return createMemo(() => selector(state()), undefined, { equals: selectorEquals });
     };
 
-    // Subscribe to changes
     const subscribe: StoreApi<T>['subscribe'] = (listener) => {
         subscribers.add(listener);
         return () => subscribers.delete(listener);
     };
 
-    // Peek at state without tracking
     const peek: StoreApi<T>['peek'] = () => {
         return untrack(() => state());
     };
@@ -321,10 +269,6 @@ export function createStore<T extends object>(
     };
 }
 
-// ============================================================================
-// Action Creators
-// ============================================================================
-
 export type ActionContext<T> = {
     get: () => T;
     set: StoreApi<T>['setState'];
@@ -333,9 +277,6 @@ export type ActionContext<T> = {
     reset: StoreApi<T>['reset'];
 };
 
-/**
- * Create typed actions for a store
- */
 export function createActions<
     T extends object,
     A extends Record<string, (...args: any[]) => any>
@@ -354,13 +295,6 @@ export function createActions<
     return factory(context);
 }
 
-// ============================================================================
-// Computed Store (Derived Store)
-// ============================================================================
-
-/**
- * Create a derived store from multiple sources
- */
 export function createDerivedStore<T extends object, R>(
     stores: { [K in keyof T]: StoreApi<T[K]> },
     derive: (states: T) => R
@@ -374,13 +308,6 @@ export function createDerivedStore<T extends object, R>(
     });
 }
 
-// ============================================================================
-// Store Utilities
-// ============================================================================
-
-/**
- * Create a logging middleware for debugging
- */
 export function createLogger<T>(name: string = 'Store'): StoreMiddleware<T> {
     return (prev, next, action) => {
         console.group(`%c${name} | ${action}`, 'color: #9E9E9E; font-weight: bold');
@@ -391,9 +318,6 @@ export function createLogger<T>(name: string = 'Store'): StoreMiddleware<T> {
     };
 }
 
-/**
- * Create an undo/redo middleware
- */
 export function createUndoRedo<T>(maxHistory: number = 50) {
     const past: T[] = [];
     const future: T[] = [];

@@ -10,7 +10,8 @@
     "declaration": true,
     "outDir": "dist",
     "jsx": "react",
-    "jsxFactory": "createElement"
+    "jsxFactory": "createElement",
+    "jsxFragmentFactory": "Fragment"
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
