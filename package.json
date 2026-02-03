@@ -6,10 +6,13 @@
         "dev": "vite",
         "build": "tsc && vite build",
         "build:ssr": "tsc && vite build --ssr src/main.tsx",
-        "preview": "vite preview"
+        "preview": "vite preview",
+        "test": "vitest --environment jsdom"
     },
     "devDependencies": {
+        "jsdom": "^28.0.0",
         "typescript": "^5.9.3",
-        "vite": "^7.3.1"
+        "vite": "^7.3.1",
+        "vitest": "^1.6.1"
     }
 }

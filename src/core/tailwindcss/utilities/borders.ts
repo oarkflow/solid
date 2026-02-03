@@ -71,8 +71,8 @@ export function resolveBorderUtility(prefix: string, value: string): Record<stri
         }
     }
 
-    // Border-t, border-r, border-b, border-l specific
-    const borderDirMatch = prefix.match(/^border-([trblxy])$/);
+    // Border-t, border-r, border-b, border-l, border-s, border-e specific
+    const borderDirMatch = prefix.match(/^border-([trblxyes])$/);
     if (borderDirMatch) {
         const dir = borderDirMatch[1];
         const dirMap: Record<string, string[]> = {
@@ -82,10 +82,32 @@ export function resolveBorderUtility(prefix: string, value: string): Record<stri
             'l': ['borderLeftWidth'],
             'x': ['borderLeftWidth', 'borderRightWidth'],
             'y': ['borderTopWidth', 'borderBottomWidth'],
+            's': ['borderInlineStartWidth'],
+            'e': ['borderInlineEndWidth'],
         };
 
+        const styleValues = new Set(['solid', 'dashed', 'dotted', 'double', 'none', 'hidden', 'groove', 'ridge', 'inset', 'outset']);
         if (dirMap[dir]) {
-            const width = (!value || value === '') ? '1px' : value + 'px';
+            // If value is a style keyword, set style properties instead of widths
+            if (value && styleValues.has(value)) {
+                return Object.fromEntries(dirMap[dir].map(p => {
+                    const styleProp = p.replace(/Width$/, 'Style');
+                    return [styleProp, value];
+                }));
+            }
+
+            // Determine width value, support arbitrary bracket values, numeric px shorthand, or raw units
+            let width: string;
+            if (!value || value === '') {
+                width = '1px';
+            } else if (value.startsWith('[')) {
+                width = resolveSpacing(value);
+            } else if (!isNaN(parseInt(value))) {
+                width = value + 'px';
+            } else {
+                width = value;
+            }
+
             return Object.fromEntries(dirMap[dir].map(p => [p, width]));
         }
     }
@@ -114,6 +136,15 @@ export function resolveBorderUtility(prefix: string, value: string): Record<stri
                 boxShadow: 'var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000)'
             };
         }
+        // Support arbitrary values like [3px] or spacing tokens
+        if (value && value.startsWith('[')) {
+            const width = resolveSpacing(value);
+            return {
+                '--tw-ring-offset-shadow': 'var(--tw-ring-inset) 0 0 0 var(--tw-ring-offset-width) var(--tw-ring-offset-color)',
+                '--tw-ring-shadow': `var(--tw-ring-inset) 0 0 0 calc(${width} + var(--tw-ring-offset-width)) var(--tw-ring-color)`,
+                boxShadow: 'var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000)'
+            };
+        }
         if (value === 'inset') {
             return { '--tw-ring-inset': 'inset' };
         }
@@ -124,10 +155,26 @@ export function resolveBorderUtility(prefix: string, value: string): Record<stri
         if (!isNaN(parseInt(value))) {
             return { '--tw-ring-offset-width': value + 'px' };
         }
+        if (value && value.startsWith('[')) {
+            return { '--tw-ring-offset-width': resolveSpacing(value) };
+        }
+    }
+
+    // Ring opacity
+    if (prefix === 'ring-opacity') {
+        if (value && value.startsWith('[')) {
+            return { '--tw-ring-opacity': value.slice(1, -1) };
+        }
+        if (!isNaN(parseInt(value))) {
+            return { '--tw-ring-opacity': (parseInt(value) / 100).toString() };
+        }
     }
 
     // Outline width
     if (prefix === 'outline') {
+        if (value && value.startsWith('[')) {
+            return { outlineWidth: resolveSpacing(value) };
+        }
         if (!isNaN(parseInt(value))) {
             return { outlineWidth: value + 'px' };
         }

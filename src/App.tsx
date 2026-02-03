@@ -3,6 +3,8 @@ import { createRouter, lazy, useRouter } from '@/core/velocity';
 
 const HomePage = lazy(() => import('@/app/pages/Home').then(m => ({ default: m.HomePage })));
 const LoginPage = lazy(() => import('@/app/pages/Login').then(m => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import('@/app/pages/Register').then(m => ({ default: m.RegisterPage })));
+const FormTestPage = lazy(() => import('@/app/pages/FormTest').then(m => ({ default: m.FormTestPage })));
 const DashboardPage = lazy(() => import('@/app/pages/Dashboard').then(m => ({ default: m.DashboardPage })));
 const SettingsPage = lazy(() => import('@/app/pages/Settings').then(m => ({ default: m.SettingsPage })));
 const ProfilePage = lazy(() => import('@/app/pages/Profile').then(m => ({ default: m.ProfilePage })));
@@ -41,6 +43,25 @@ const routes = [
             description: 'Start a signed session to unlock dashboards and protected controls.',
             canonical: '/login',
             tags: [{ name: 'robots', content: 'noindex, nofollow' }],
+        },
+    },
+    {
+        path: '/register',
+        component: RegisterPage,
+        meta: {
+            title: 'Register',
+            description: 'Create a new account with comprehensive form validation examples.',
+            canonical: '/register',
+            tags: [{ name: 'robots', content: 'noindex, nofollow' }],
+        },
+    },
+    {
+        path: '/form-test',
+        component: FormTestPage,
+        meta: {
+            title: 'Form Test',
+            description: 'Minimal form testing page.',
+            canonical: '/form-test',
         },
     },
     {

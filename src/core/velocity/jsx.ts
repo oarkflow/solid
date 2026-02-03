@@ -404,8 +404,10 @@ export function createElement(
 
             // Reactive prop
             if (typeof value === 'function' && key !== 'ref') {
+                const fn = value; // Capture the function
                 createEffect(() => {
-                    setAttr(el, key, value(), isSvg);
+                    const result = fn();
+                    setAttr(el, key, result, isSvg);
                     const meta = elementRegistry.get(el);
                     if (meta) {
                         meta.propsSet++;
@@ -586,6 +588,7 @@ export function lazy<T extends FC<any>>(
         return createElement('div', { style: { display: 'contents' } }, () => {
             const err = error();
             if (err) {
+                console.error(err)
                 return createElement(
                     'div',
                     { class: 'card', style: { padding: '20px', color: '#ef4444' } },

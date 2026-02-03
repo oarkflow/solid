@@ -20,7 +20,10 @@ export function resolveColor(str: string): string | null {
     const directColor = colors[str];
     if (directColor && typeof directColor === 'string') return directColor;
 
-    const [color, shade] = str.split('-');
+    // Split color and shade using last dash to support names like 'light-blue-500'
+    const parts = str.split('-');
+    const shade = parts.length > 1 ? parts.pop() as string : undefined;
+    const color = parts.join('-');
     const colorValue = colors[color];
     if (colorValue && typeof colorValue === 'object' && shade) {
         return (colorValue as Record<string, string>)[shade] || null;

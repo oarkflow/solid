@@ -49,6 +49,35 @@ export function resolveAnimationUtility(prefix: string, value: string): Record<s
         return { [property]: parseArbitrary(value) };
     }
 
+    // Duration
+    if (prefix === 'duration') {
+        const dur = value.startsWith('[') ? parseArbitrary(value) : (value.endsWith('ms') ? value : (parseInt(value) + 'ms'));
+        return { transitionDuration: dur };
+    }
+
+    // Delay
+    if (prefix === 'delay') {
+        const d = value.startsWith('[') ? parseArbitrary(value) : (value.endsWith('ms') ? value : (parseInt(value) + 'ms'));
+        return { transitionDelay: d };
+    }
+
+    // Ease / timing functions
+    if (prefix === 'ease') {
+        const eases: Record<string, string> = {
+            'linear': 'linear',
+            'in': 'cubic-bezier(0.4, 0, 1, 1)',
+            'out': 'cubic-bezier(0, 0, 0.2, 1)',
+            'in-out': 'cubic-bezier(0.4, 0, 0.2, 1)'
+        };
+        return { transitionTimingFunction: eases[value] || parseArbitrary(value) };
+    }
+
+    // Generic transition property setter: transition-{property}
+    if (prefix === 'transition') {
+        if (value === 'none') return { transitionProperty: 'none' };
+        return { transitionProperty: value.replace(/-/g, ' ') };
+    }
+
     // Will change
     if (prefix === 'will-change') {
         const changes: Record<string, string> = {

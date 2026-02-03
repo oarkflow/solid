@@ -5,6 +5,7 @@
 
 export { staticUtilities } from './static';
 export { resolveSpacingUtility, spacingPropMap } from './spacing';
+export { resolveGradientUtility } from './gradients';
 export { resolveColorUtility, applyOpacity } from './colors';
 export { resolveTypographyUtility } from './typography';
 export { resolveBorderUtility } from './borders';

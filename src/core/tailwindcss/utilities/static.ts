@@ -137,14 +137,14 @@ export const staticUtilities: Record<string, any> = {
     'overflow-y-scroll': { overflowY: 'scroll' },
 
     // Shadows
-    'shadow-sm': { boxShadow: resolvedTheme.boxShadow.sm },
-    'shadow': { boxShadow: resolvedTheme.boxShadow.DEFAULT },
-    'shadow-md': { boxShadow: resolvedTheme.boxShadow.md },
-    'shadow-lg': { boxShadow: resolvedTheme.boxShadow.lg },
-    'shadow-xl': { boxShadow: resolvedTheme.boxShadow.xl },
-    'shadow-2xl': { boxShadow: resolvedTheme.boxShadow['2xl'] },
-    'shadow-inner': { boxShadow: 'inset 0 2px 4px 0 rgb(0 0 0 / 0.05)' },
-    'shadow-none': { boxShadow: 'none' },
+    'shadow-sm': { '--tw-shadow': resolvedTheme.boxShadow.sm, boxShadow: 'var(--tw-shadow)' },
+    'shadow': { '--tw-shadow': resolvedTheme.boxShadow.DEFAULT, boxShadow: 'var(--tw-shadow)' },
+    'shadow-md': { '--tw-shadow': resolvedTheme.boxShadow.md, boxShadow: 'var(--tw-shadow)' },
+    'shadow-lg': { '--tw-shadow': resolvedTheme.boxShadow.lg, boxShadow: 'var(--tw-shadow)' },
+    'shadow-xl': { '--tw-shadow': resolvedTheme.boxShadow.xl, boxShadow: 'var(--tw-shadow)' },
+    'shadow-2xl': { '--tw-shadow': resolvedTheme.boxShadow['2xl'], boxShadow: 'var(--tw-shadow)' },
+    'shadow-inner': { '--tw-shadow': resolvedTheme.boxShadow.inner, boxShadow: 'var(--tw-shadow)' },
+    'shadow-none': { '--tw-shadow': 'none', boxShadow: 'none' },
 
     // Border
     'border': { borderWidth: '1px', borderStyle: 'solid' },

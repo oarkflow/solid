@@ -175,7 +175,7 @@ export {
     createVisibilityState,
     createOnlineStatus,
 
-    // Forms
+    // Legacy Forms (basic)
     createFormField,
     createForm,
     validators,
@@ -189,13 +189,103 @@ export {
     sleep,
     clamp,
     groupBy,
+    useRef,
 } from './utils';
 
 export type {
     FormField,
     FormFieldOptions,
-    FormControl,
+    FormControl as LegacyFormControl,
 } from './utils';
+
+// ============================================================================
+// Form Management (react-hook-form like)
+// ============================================================================
+
+export {
+    useForm,
+    useFieldArray,
+    useWatch,
+    useFormState,
+    useController,
+    schemaResolver,
+} from './form';
+
+export type {
+    UseFormConfig,
+    UseFormReturn,
+    UseFormRegisterReturn,
+    UseFieldArrayConfig,
+    UseFieldArrayReturn,
+    UseWatchConfig,
+    UseFormStateConfig,
+    UseControllerConfig,
+    UseControllerReturn,
+    FormState,
+    FieldError,
+    FieldErrors,
+    FieldPath,
+    PathValue,
+    ValidationMode,
+    RevalidateMode,
+    RegisterOptions,
+    ValidateFunction,
+    SetValueOptions,
+    ResetOptions,
+    SubmitHandler,
+    SubmitErrorHandler,
+    FormResolver,
+    FormControl,
+    FormProps,
+    FieldArrayField,
+} from './form';
+
+// ============================================================================
+// Schema Validation (zod-like)
+// ============================================================================
+
+export {
+    v,
+    Schema,
+    ValidationException,
+    IssueCodes,
+
+    // Schema classes
+    StringSchema,
+    NumberSchema,
+    BooleanSchema,
+    DateSchema,
+    ArraySchema,
+    ObjectSchema,
+    EnumSchema,
+    NativeEnumSchema,
+    LiteralSchema,
+    UnionSchema,
+    DiscriminatedUnionSchema,
+    TupleSchema,
+    RecordSchema,
+    AnySchema,
+    UnknownSchema,
+    NeverSchema,
+    VoidSchema,
+    NullSchema,
+    UndefinedSchema,
+    IntersectionSchema,
+    LazySchema,
+    PreprocessSchema,
+    CoercedStringSchema,
+    CoercedNumberSchema,
+    CoercedBooleanSchema,
+    CoercedDateSchema,
+} from './schema';
+
+export type {
+    ValidationError,
+    ParseResult,
+    IssueCode,
+    infer as SchemaInfer,
+    input as SchemaInput,
+} from './schema';
 
 // ============================================================================
 // JSX Factory (for TypeScript/Babel)

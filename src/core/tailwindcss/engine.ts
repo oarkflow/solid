@@ -8,6 +8,7 @@ import { StyleManager } from './style-manager';
 import {
     staticUtilities,
     resolveSpacingUtility,
+    resolveGradientUtility,
     resolveColorUtility,
     resolveTypographyUtility,
     resolveBorderUtility,
@@ -52,47 +53,81 @@ export const TailwindEngine = {
         }
 
         // Regular pattern matching
-        const match = current.match(/^(-?)([a-z][a-z0-9-]*?)(?:-(.+))?$/);
-        if (!match) return null;
+        // Parse negative prefix
+        const negative = current.startsWith('-') ? '-' : '';
+        const s = negative ? current.slice(1) : current;
 
-        const [, negative, prefix, value] = match;
-
-        // If no value, check if it's a valid valueless utility
-        if (!value) {
-            if (prefix === 'border') {
-                return { borderWidth: '1px', borderStyle: 'solid' };
+        // Helper to attempt resolving utilities for a given prefix/value
+        const tryResolve = (prefix: string, value?: string) => {
+            if (!value) {
+                if (prefix === 'border') return { borderWidth: '1px', borderStyle: 'solid' };
+                return null;
             }
-            return null;
-        }
+            return (
+                resolveSpacingUtility(prefix, value) ||
+                resolveGradientUtility(prefix, value) ||
+                resolveColorUtility(prefix, value) ||
+                resolveTypographyUtility(prefix, value) ||
+                resolveBorderUtility(prefix, value) ||
+                resolveTransformUtility(prefix, value) ||
+                resolveEffectUtility(prefix, value) ||
+                resolveLayoutUtility(prefix, value) ||
+                resolveAnimationUtility(prefix, value) ||
+                resolveMiscUtility(prefix, value)
+            );
+        };
 
-        // Try all utility resolvers in order
-        // Note: Color resolver must come before typography for 'text' prefix
-        let result =
-            resolveSpacingUtility(prefix, value) ||
-            resolveColorUtility(prefix, value) ||
-            resolveTypographyUtility(prefix, value) ||
-            resolveBorderUtility(prefix, value) ||
-            resolveTransformUtility(prefix, value) ||
-            resolveEffectUtility(prefix, value) ||
-            resolveLayoutUtility(prefix, value) ||
-            resolveAnimationUtility(prefix, value) ||
-            resolveMiscUtility(prefix, value);
-
-        // Apply negative prefix if needed
-        if (result && negative === '-') {
-            for (const k in result) {
-                const v = result[k];
-                if (typeof v === 'string') {
-                    if (v.includes('rem') || v.includes('px') || v.includes('em') || v.includes('%')) {
-                        result[k] = `-${v}`;
-                    } else if (!isNaN(parseFloat(v))) {
-                        result[k] = `-${v}`;
+        // First try split at the FIRST hyphen (handles cases like bg-blue-600 -> prefix=bg)
+        const firstDash = s.indexOf('-');
+        if (firstDash !== -1) {
+            const prefix1 = s.slice(0, firstDash);
+            const value1 = s.slice(firstDash + 1);
+            let result = tryResolve(prefix1, value1);
+            if (result) {
+                if (negative === '-') {
+                    for (const k in result) {
+                        const v = result[k];
+                        if (typeof v === 'string') {
+                            if (v.includes('rem') || v.includes('px') || v.includes('em') || v.includes('%')) {
+                                result[k] = `-${v}`;
+                            } else if (!isNaN(parseFloat(v))) {
+                                result[k] = `-${v}`;
+                            }
+                        }
                     }
                 }
+                return result;
             }
+
+            // If first split didn't work, try split at the LAST hyphen (handles drop-shadow-md -> prefix=drop-shadow)
+            const lastDash = s.lastIndexOf('-');
+            if (lastDash !== -1 && lastDash !== firstDash) {
+                const prefix2 = s.slice(0, lastDash);
+                const value2 = s.slice(lastDash + 1);
+                result = tryResolve(prefix2, value2);
+                if (result) {
+                    if (negative === '-') {
+                        for (const k in result) {
+                            const v = result[k];
+                            if (typeof v === 'string') {
+                                if (v.includes('rem') || v.includes('px') || v.includes('em') || v.includes('%')) {
+                                    result[k] = `-${v}`;
+                                } else if (!isNaN(parseFloat(v))) {
+                                    result[k] = `-${v}`;
+                                }
+                            }
+                        }
+                    }
+                    return result;
+                }
+            }
+        } else {
+            // No hyphen, try as a valueless prefix
+            const valueless = tryResolve(s, undefined);
+            if (valueless) return valueless;
         }
 
-        return result;
+        return null;
     },
 
     /**

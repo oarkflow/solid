@@ -18,6 +18,42 @@ export const StyleManager = {
         this.init();
         if (!this.styleTag) return;
 
+        // Utility: compute rgb parts from any CSS color expression by using a temporary element
+        const computeRgbParts = (val: string): string | null => {
+            if (typeof document === 'undefined') return null;
+
+            // If value uses CSS var(), attempt to resolve it from root inline style first (jsdom may not compute vars)
+            const varMatch = val.match(/var\((--[\w-]+)\)/);
+            if (varMatch) {
+                const varName = varMatch[1];
+                const rootVal = document.documentElement.style.getPropertyValue(varName).trim();
+                if (rootVal) {
+                    // Replace var(...) with resolved value and continue
+                    const replaced = val.replace(varMatch[0], rootVal);
+                    // Try with replaced string (could be a hex, hsl, etc.)
+                    val = replaced;
+                }
+            }
+
+            try {
+                const el = document.createElement('div');
+                el.style.color = val;
+                // ensure it doesn't affect layout or visibility
+                el.style.position = 'absolute';
+                el.style.left = '-9999px';
+                el.style.width = '0';
+                el.style.height = '0';
+                document.body.appendChild(el);
+                const cs = getComputedStyle(el).color;
+                document.body.removeChild(el);
+                const m = cs && cs.match(/rgba?\((\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+                if (m) return `${m[1]} ${m[2]} ${m[3]}`;
+            } catch (e) {
+                // ignore
+            }
+            return null;
+        };
+
         // Escape class name for CSS selector
         const selector = className
             .replace(/:/g, '\\:')
@@ -36,7 +72,16 @@ export const StyleManager = {
 
         // Convert camelCase CSS properties to kebab-case
         const cssProp = prop.replace(/([A-Z])/g, '-$1').toLowerCase();
-        const body = `${cssProp}: ${value}${important};`;
+        let body = `${cssProp}: ${value}${important};`;
+
+        // Special-case: when setting --tw-shadow-color, try to compute an 'r g b' value and also store the raw
+        if (cssProp === '--tw-shadow-color') {
+            const parts = computeRgbParts(value);
+            if (parts) {
+                // set computed parts and also preserve raw value
+                body = `--tw-shadow-color: ${parts}${important}; --tw-shadow-color-raw: ${value}${important};`;
+            }
+        }
 
         switch (modifier) {
             case 'hover': rule = `.${selector}:hover { ${body} }`; break;

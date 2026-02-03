@@ -8,6 +8,18 @@
 import { createSignal, createEffect, onCleanup, batch } from './reactivity';
 
 // ============================================================================
+// Hooks
+// ============================================================================
+
+/**
+ * Create a mutable ref object
+ */
+export function useRef<T = any>(initialValue?: T) {
+    const [ref] = createSignal<{ current: T }>({ current: initialValue as T });
+    return ref();
+}
+
+// ============================================================================
 // Environment Detection
 // ============================================================================
 

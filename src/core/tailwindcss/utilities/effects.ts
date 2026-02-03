@@ -5,44 +5,65 @@
 
 import { resolveOpacity, parseArbitrary } from '../resolvers';
 
+// Blur size map for named sizes
+const blurSizes: Record<string, string> = {
+    'none': '0',
+    'sm': '4px',
+    '': '8px',
+    'md': '12px',
+    'lg': '16px',
+    'xl': '24px',
+    '2xl': '40px',
+    '3xl': '64px',
+};
+
 export function resolveEffectUtility(prefix: string, value: string): Record<string, any> | null {
     // Opacity
     if (prefix === 'opacity') {
         return { opacity: resolveOpacity(value) };
     }
 
-    // Filters
+    // Blur filter - simplified direct approach
     if (prefix === 'blur') {
-        const val = value.startsWith('[') ? parseArbitrary(value) : value + 'px';
-        return { filter: `blur(${val})` };
+        let blurVal: string;
+        if (value.startsWith('[')) {
+            blurVal = parseArbitrary(value);
+        } else if (blurSizes[value] !== undefined) {
+            blurVal = blurSizes[value];
+        } else if (!isNaN(parseInt(value))) {
+            blurVal = value + 'px';
+        } else {
+            blurVal = '8px'; // default
+        }
+        return { '--tw-blur': `blur(${blurVal})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'brightness') {
         const val = value.startsWith('[') ? parseArbitrary(value) : (parseInt(value) / 100).toString();
-        return { filter: `brightness(${val})` };
+        return { '--tw-brightness': `brightness(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'contrast') {
         const val = value.startsWith('[') ? parseArbitrary(value) : (parseInt(value) / 100).toString();
-        return { filter: `contrast(${val})` };
+        return { '--tw-contrast': `contrast(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'grayscale') {
         const val = value.startsWith('[') ? parseArbitrary(value) : value === '' ? '1' : (parseInt(value) / 100).toString();
-        return { filter: `grayscale(${val})` };
+        return { '--tw-grayscale': `grayscale(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'hue-rotate') {
         const val = value.startsWith('[') ? parseArbitrary(value) : value + 'deg';
-        return { filter: `hue-rotate(${val})` };
+        return { '--tw-hue-rotate': `hue-rotate(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'invert') {
         const val = value.startsWith('[') ? parseArbitrary(value) : value === '' ? '1' : (parseInt(value) / 100).toString();
-        return { filter: `invert(${val})` };
+        return { '--tw-invert': `invert(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'saturate') {
         const val = value.startsWith('[') ? parseArbitrary(value) : (parseInt(value) / 100).toString();
-        return { filter: `saturate(${val})` };
+        return { '--tw-saturate': `saturate(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'sepia') {
         const val = value.startsWith('[') ? parseArbitrary(value) : value === '' ? '1' : (parseInt(value) / 100).toString();
-        return { filter: `sepia(${val})` };
+        return { '--tw-sepia': `sepia(${val})`, filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
     if (prefix === 'drop-shadow') {
         const shadows: Record<string, string> = {
@@ -54,7 +75,7 @@ export function resolveEffectUtility(prefix: string, value: string): Record<stri
             '2xl': 'drop-shadow(0 25px 25px rgb(0 0 0 / 0.15))',
             'none': 'drop-shadow(0 0 #0000)',
         };
-        return { filter: shadows[value] || parseArbitrary(value) };
+        return { '--tw-drop-shadow': shadows[value] ?? parseArbitrary(value), filter: 'var(--tw-blur, ) var(--tw-brightness, ) var(--tw-contrast, ) var(--tw-grayscale, ) var(--tw-hue-rotate, ) var(--tw-invert, ) var(--tw-saturate, ) var(--tw-sepia, ) var(--tw-drop-shadow, )' };
     }
 
     // Backdrop filters
