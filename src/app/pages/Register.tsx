@@ -1,5 +1,5 @@
 /**
- * Register Page - Simple Working Version
+ * Register Page - With Production Validation
  */
 
 import {
@@ -13,7 +13,6 @@ import { authActions } from '@/app/stores/auth';
 import { addActivity } from '@/app/stores/app';
 import { getRouterApi } from '@/app/router/navigation';
 
-// Simple type without schema
 interface RegisterFormData {
     username: string;
     email: string;
@@ -31,8 +30,7 @@ export const RegisterPage: FC = () => {
     const [showPassword, setShowPassword] = createSignal(false);
     const [submitResult, setSubmitResult] = createSignal<{ success: boolean; message: string } | null>(null);
 
-    // Initialize form WITHOUT schema validation
-    const form = useForm<RegisterFormData>({
+    const { register, handleSubmit, errors, formState, watch, isSubmitting } = useForm<RegisterFormData>({
         defaultValues: {
             username: '',
             email: '',
@@ -44,25 +42,16 @@ export const RegisterPage: FC = () => {
             notifyEmail: true,
             notifySms: false,
         },
+        mode: 'onBlur',
+        revalidateMode: 'onChange',
     });
 
-    // Pre-register all fields
-    const usernameField = form.register('username');
-    const emailField = form.register('email');
-    const passwordField = form.register('password');
-    const confirmPasswordField = form.register('confirmPassword');
-    const displayNameField = form.register('displayName');
-    const roleField = form.register('role');
-    const acceptTermsField = form.register('acceptTerms');
-    const notifyEmailField = form.register('notifyEmail');
-    const notifySmsField = form.register('notifySms');
-
     // Watch password for strength indicator
-    const watchedPassword = form.watch('password');
+    const watchedPassword = watch('password');
 
     // Password strength
     const passwordStrength = createMemo(() => {
-        const pwd = watchedPassword || '';
+        const pwd = watchedPassword;
         let strength = 0;
         if (pwd.length >= 8) strength++;
         if (pwd.length >= 12) strength++;
@@ -81,58 +70,33 @@ export const RegisterPage: FC = () => {
         return { text: 'Strong', color: 'bg-green-500' };
     });
 
-    // Simple submit handler
-    const handleFormSubmit = (e: Event) => {
-        e.preventDefault();
-        const data = form.getValues();
-        console.log('Form data:', data);
+    const onSubmit = handleSubmit(
+        (data) => {
+            console.log('Form data:', data);
+            setSubmitResult({ success: true, message: 'Registration successful!' });
+            authActions.login(data.username);
+            addActivity(`Registered as ${data.username}`);
 
-        // Basic validation
-        if (!data.username) {
-            setSubmitResult({ success: false, message: 'Username is required' });
-            return;
+            setTimeout(() => {
+                startTransition(() => router.navigate('/dashboard'));
+            }, 1500);
+        },
+        (formErrors) => {
+            const firstError = Object.values(formErrors).find(Boolean);
+            setSubmitResult({
+                success: false,
+                message: firstError?.message ?? 'Please fix validation errors above.',
+            });
         }
-        if (!data.email) {
-            setSubmitResult({ success: false, message: 'Email is required' });
-            return;
-        }
-        if (!data.password || data.password.length < 8) {
-            setSubmitResult({ success: false, message: 'Password must be at least 8 characters' });
-            return;
-        }
-        if (data.password !== data.confirmPassword) {
-            setSubmitResult({ success: false, message: 'Passwords do not match' });
-            return;
-        }
-        if (!data.acceptTerms) {
-            setSubmitResult({ success: false, message: 'You must accept the terms' });
-            return;
-        }
-
-        setSubmitResult({ success: true, message: 'Registration successful!' });
-        authActions.login(data.username);
-        addActivity(`Registered as ${data.username}`);
-
-        setTimeout(() => {
-            startTransition(() => router.navigate('/dashboard'));
-        }, 1500);
-    };
+    );
 
     return (
         <div class="max-w-2xl mx-auto p-6">
             <div class="card">
                 <h1 class="text-2xl font-bold mb-2">Create Account</h1>
-                <p class="text-gray-600 mb-6">Simple registration form.</p>
+                <p class="text-gray-600 mb-6">Register with built-in validation.</p>
 
-                {/* Debug Panel */}
-                <details class="mb-6 p-4 bg-gray-100 rounded-lg" open>
-                    <summary class="cursor-pointer font-semibold">Form Values (Debug)</summary>
-                    <pre class="mt-2 text-xs font-mono bg-white p-2 rounded overflow-auto">
-                        {() => JSON.stringify(form.getValues(), null, 2)}
-                    </pre>
-                </details>
-
-                <form onSubmit={handleFormSubmit} class="space-y-6">
+                <form onSubmit={onSubmit} class="space-y-6">
 
                     {/* === Account === */}
                     <section>
@@ -141,42 +105,51 @@ export const RegisterPage: FC = () => {
                         <div class="mb-4">
                             <label class="block text-sm font-medium mb-1">Username *</label>
                             <input
+                                {...register('username', {
+                                    required: 'Username is required',
+                                    minLength: { value: 3, message: 'At least 3 characters' },
+                                    maxLength: { value: 24, message: 'Must be 24 characters or fewer' },
+                                    pattern: { value: /^[a-zA-Z0-9_]+$/, message: 'Only letters, numbers, and underscores' },
+                                    setValueAs: (value: string) => value.trim(),
+                                })}
                                 type="text"
                                 class="border p-2 w-full rounded"
                                 placeholder="johndoe"
-                                name={usernameField.name}
-                                value={usernameField.value}
-                                onInput={usernameField.onInput}
-                                onBlur={usernameField.onBlur}
-                                ref={usernameField.ref}
                             />
+                            {() => {
+                                const error = errors().username;
+                                return error ? <p class="text-sm text-red-600 mt-1">{error.message}</p> : null;
+                            }}
                         </div>
 
                         <div class="mb-4">
                             <label class="block text-sm font-medium mb-1">Email *</label>
                             <input
+                                {...register('email', {
+                                    required: 'Email is required',
+                                    pattern: {
+                                        value: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+                                        message: 'Enter a valid email address'
+                                    },
+                                    setValueAs: (value: string) => value.trim(),
+                                })}
                                 type="email"
                                 class="border p-2 w-full rounded"
                                 placeholder="john@example.com"
-                                name={emailField.name}
-                                value={emailField.value}
-                                onInput={emailField.onInput}
-                                onBlur={emailField.onBlur}
-                                ref={emailField.ref}
                             />
+                            {() => {
+                                const error = errors().email;
+                                return error ? <p class="text-sm text-red-600 mt-1">{error.message}</p> : null;
+                            }}
                         </div>
 
                         <div class="mb-4">
                             <label class="block text-sm font-medium mb-1">Display Name</label>
                             <input
+                                {...register('displayName')}
                                 type="text"
                                 class="border p-2 w-full rounded"
                                 placeholder="John Doe"
-                                name={displayNameField.name}
-                                value={displayNameField.value}
-                                onInput={displayNameField.onInput}
-                                onBlur={displayNameField.onBlur}
-                                ref={displayNameField.ref}
                             />
                         </div>
                     </section>
@@ -189,14 +162,19 @@ export const RegisterPage: FC = () => {
                             <label class="block text-sm font-medium mb-1">Password *</label>
                             <div class="relative">
                                 <input
+                                    {...register('password', {
+                                        required: 'Password is required',
+                                        minLength: { value: 8, message: 'Password must be at least 8 characters' },
+                                        validate: {
+                                            hasUppercase: (value: string) => /[A-Z]/.test(value) || 'Include an uppercase letter',
+                                            hasLowercase: (value: string) => /[a-z]/.test(value) || 'Include a lowercase letter',
+                                            hasNumber: (value: string) => /\d/.test(value) || 'Include a number',
+                                            hasSpecial: (value: string) => /[^A-Za-z0-9]/.test(value) || 'Include a special character',
+                                        },
+                                    })}
                                     type={showPassword() ? 'text' : 'password'}
                                     class="border p-2 w-full rounded pr-16"
                                     placeholder="••••••••"
-                                    name={passwordField.name}
-                                    value={passwordField.value}
-                                    onInput={passwordField.onInput}
-                                    onBlur={passwordField.onBlur}
-                                    ref={passwordField.ref}
                                 />
                                 <button
                                     type="button"
@@ -206,6 +184,10 @@ export const RegisterPage: FC = () => {
                                     {showPassword() ? 'Hide' : 'Show'}
                                 </button>
                             </div>
+                            {() => {
+                                const error = errors().password;
+                                return error ? <p class="text-sm text-red-600 mt-1">{error.message}</p> : null;
+                            }}
 
                             {/* Strength bar */}
                             <div class="mt-2 flex gap-1">
@@ -219,15 +201,20 @@ export const RegisterPage: FC = () => {
                         <div class="mb-4">
                             <label class="block text-sm font-medium mb-1">Confirm Password *</label>
                             <input
+                                {...register('confirmPassword', {
+                                    required: 'Please confirm your password',
+                                    deps: ['password'],
+                                    validate: (value: string, ctx) =>
+                                        value === ctx.getValue('password') || 'Passwords must match',
+                                })}
                                 type={showPassword() ? 'text' : 'password'}
                                 class="border p-2 w-full rounded"
                                 placeholder="••••••••"
-                                name={confirmPasswordField.name}
-                                value={confirmPasswordField.value}
-                                onInput={confirmPasswordField.onInput}
-                                onBlur={confirmPasswordField.onBlur}
-                                ref={confirmPasswordField.ref}
                             />
+                            {() => {
+                                const error = errors().confirmPassword;
+                                return error ? <p class="text-sm text-red-600 mt-1">{error.message}</p> : null;
+                            }}
                         </div>
                     </section>
 
@@ -238,18 +225,18 @@ export const RegisterPage: FC = () => {
                         <div class="mb-4">
                             <label class="block text-sm font-medium mb-1">Role</label>
                             <select
+                                {...register('role', { required: 'Select a role' })}
                                 class="border p-2 w-full rounded"
-                                name={roleField.name}
-                                value={roleField.value}
-                                onChange={roleField.onChange}
-                                onBlur={roleField.onBlur}
-                                ref={roleField.ref}
                             >
                                 <option value="developer">Developer</option>
                                 <option value="designer">Designer</option>
                                 <option value="manager">Manager</option>
                                 <option value="other">Other</option>
                             </select>
+                            {() => {
+                                const error = errors().role;
+                                return error ? <p class="text-sm text-red-600 mt-1">{error.message}</p> : null;
+                            }}
                         </div>
                     </section>
 
@@ -260,24 +247,18 @@ export const RegisterPage: FC = () => {
                         <div class="space-y-2">
                             <label class="flex items-center gap-2">
                                 <input
+                                    {...register('notifyEmail')}
                                     type="checkbox"
                                     class="w-4 h-4"
-                                    name={notifyEmailField.name}
-                                    checked={notifyEmailField.checked}
-                                    onChange={notifyEmailField.onChange}
-                                    ref={notifyEmailField.ref}
                                 />
                                 <span>Email notifications</span>
                             </label>
 
                             <label class="flex items-center gap-2">
                                 <input
+                                    {...register('notifySms')}
                                     type="checkbox"
                                     class="w-4 h-4"
-                                    name={notifySmsField.name}
-                                    checked={notifySmsField.checked}
-                                    onChange={notifySmsField.onChange}
-                                    ref={notifySmsField.ref}
                                 />
                                 <span>SMS notifications</span>
                             </label>
@@ -289,15 +270,18 @@ export const RegisterPage: FC = () => {
                         <div class="mb-4">
                             <label class="flex items-center gap-2">
                                 <input
+                                    {...register('acceptTerms', {
+                                        validate: (value: boolean) => value || 'You must accept the terms',
+                                    })}
                                     type="checkbox"
                                     class="w-4 h-4"
-                                    name={acceptTermsField.name}
-                                    checked={acceptTermsField.checked}
-                                    onChange={acceptTermsField.onChange}
-                                    ref={acceptTermsField.ref}
                                 />
                                 <span>I accept the Terms and Conditions *</span>
                             </label>
+                            {() => {
+                                const error = errors().acceptTerms;
+                                return error ? <p class="text-sm text-red-600 mt-2">{error.message}</p> : null;
+                            }}
                         </div>
 
                         {submitResult() && (
@@ -307,10 +291,14 @@ export const RegisterPage: FC = () => {
                         )}
 
                         <div class="flex gap-3">
-                            <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1">
-                                Create Account
+                            <button
+                                type="submit"
+                                disabled={isSubmitting}
+                                class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                            >
+                                {() => isSubmitting() ? 'Creating...' : 'Create Account'}
                             </button>
-                            <button type="button" onClick={() => form.reset()} class="px-4 py-2 border rounded hover:bg-gray-50">
+                            <button type="button" onClick={() => window.location.reload()} class="px-4 py-2 border rounded hover:bg-gray-50">
                                 Reset
                             </button>
                         </div>

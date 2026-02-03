@@ -169,7 +169,6 @@
  */
 
 import { createSignal, createEffect, createMemo, batch, onCleanup, untrack } from './reactivity';
-import { Schema, ValidationError } from './schema';
 
 // ============================================================================
 // Types
@@ -204,10 +203,15 @@ export interface FieldError {
     type: string;
     message: string;
     ref?: HTMLElement;
+    types?: Record<string, string>;
 }
 
 /** Form errors object */
 export type FieldErrors<T> = Partial<Record<keyof T | string, FieldError>>;
+
+type RequiredRule = boolean | string | { value: boolean; message?: string };
+type NumericRule = number | { value: number; message?: string };
+type PatternRule = RegExp | { value: RegExp; message?: string };
 
 /** Form state */
 export interface FormState<T> {
@@ -353,48 +357,48 @@ export interface FormState<T> {
  * })
  * ```
  */
-export interface RegisterOptions<T = any> {
+export interface RegisterOptions<T = any, TFormValues extends Record<string, any> = Record<string, any>> {
     /**
      * Mark field as required.
      * @example required: true
      * @example required: 'This field is required'
      */
-    required?: boolean | string;
+    required?: RequiredRule;
 
     /**
      * Minimum value for numbers.
      * @example min: 0
      * @example min: { value: 18, message: 'Must be at least 18' }
      */
-    min?: number | { value: number; message: string };
+    min?: NumericRule;
 
     /**
      * Maximum value for numbers.
      * @example max: 100
      * @example max: { value: 1000, message: 'Cannot exceed 1000' }
      */
-    max?: number | { value: number; message: string };
+    max?: NumericRule;
 
     /**
      * Minimum length for strings.
      * @example minLength: 3
      * @example minLength: { value: 8, message: 'Password must be at least 8 characters' }
      */
-    minLength?: number | { value: number; message: string };
+    minLength?: NumericRule;
 
     /**
      * Maximum length for strings.
      * @example maxLength: 100
      * @example maxLength: { value: 280, message: 'Tweet cannot exceed 280 characters' }
      */
-    maxLength?: number | { value: number; message: string };
+    maxLength?: NumericRule;
 
     /**
      * Regular expression pattern to match.
      * @example pattern: /^[a-zA-Z]+$/
      * @example pattern: { value: /^\d{5}(-\d{4})?$/, message: 'Invalid ZIP code' }
      */
-    pattern?: RegExp | { value: RegExp; message: string };
+    pattern?: PatternRule;
 
     /**
      * Custom validation function(s). Return true for valid, string for error message.
@@ -402,7 +406,7 @@ export interface RegisterOptions<T = any> {
      * @example validate: (v) => v.length > 0 || 'Required'
      * @example validate: { isEven: (v) => v % 2 === 0 || 'Must be even' }
      */
-    validate?: ValidateFunction<T> | Record<string, ValidateFunction<T>>;
+    validate?: ValidateFunction<T, TFormValues> | Record<string, ValidateFunction<T, TFormValues>>;
 
     /**
      * Convert input value to number automatically.
@@ -448,17 +452,27 @@ export interface RegisterOptions<T = any> {
 }
 
 /** Validation function */
-export type ValidateFunction<T> = (value: T) => boolean | string | Promise<boolean | string>;
+export interface FieldValidationContext<TFormValues extends Record<string, any> = Record<string, any>> {
+    name: string;
+    value: any;
+    values: TFormValues;
+    formState: FormState<TFormValues>;
+    getValue: (path: FieldPath<TFormValues> | string) => any;
+    options?: RegisterOptions<any, TFormValues>;
+}
+
+export type ValidateFunction<T, TFormValues extends Record<string, any> = Record<string, any>> = (
+    value: T,
+    context: FieldValidationContext<TFormValues>
+) => boolean | string | FieldError | Promise<boolean | string | FieldError>;
 
 /** Field registration result */
 export interface UseFormRegisterReturn {
     name: string;
     ref: (element: HTMLElement | null) => void;
+    onInput: (event: Event) => void;
     onChange: (event: Event) => void;
     onBlur: (event: Event) => void;
-    onInput?: (event: Event) => void;
-    value: () => any;
-    checked: () => boolean;
     disabled?: boolean;
 }
 
@@ -491,9 +505,9 @@ export interface UseFormConfig<T extends Record<string, any>> {
     criteriaMode?: 'firstError' | 'all';
     shouldFocusError?: boolean;
     delayError?: number;
-    schema?: Schema<T>;
     resolver?: FormResolver<T>;
     disabled?: boolean;
+    validationRules?: Partial<Record<FieldPath<T> | string, RegisterOptions<any, T>>>;
 }
 
 /** Custom resolver */
@@ -520,7 +534,7 @@ export interface FieldArrayField<T = any> {
 /** Form return type */
 export interface UseFormReturn<T extends Record<string, any>> {
     // Core methods
-    register: <K extends keyof T | string>(name: K, options?: RegisterOptions<PathValue<T, K & string>>) => UseFormRegisterReturn;
+    register: <K extends keyof T | string>(name: K, options?: RegisterOptions<PathValue<T, K & string>, T>) => UseFormRegisterReturn;
     unregister: (name: keyof T | string | (keyof T | string)[], options?: { keepValue?: boolean; keepError?: boolean; keepDirty?: boolean; keepTouched?: boolean }) => void;
 
     // Form handling
@@ -557,25 +571,32 @@ export interface UseFormReturn<T extends Record<string, any>> {
 
     // Field array support
     control: FormControl<T>;
+
+    // Direct signal accessors for reactive tracking
+    isSubmitting: () => boolean;
+    isSubmitted: () => boolean;
+    isSubmitSuccessful: () => boolean;
+    isDirty: () => boolean;
+    isValid: () => boolean;
+    isValidating: () => boolean;
 }
 
 /** Internal form control */
-export interface FormControl<T> {
+export interface FormControl<T extends Record<string, any>> {
     _formState: () => FormState<T>;
     _getFieldValue: (name: string) => any;
     _setFieldValue: (name: string, value: any) => void;
-    _register: (name: string, options?: RegisterOptions) => void;
+    _register: (name: string, options?: RegisterOptions<any, T>) => void;
     _unregister: (name: string) => void;
     _fields: Map<string, FieldRef>;
     _defaultValues: T;
-    _schema?: Schema<T>;
 }
 
 /** Field reference */
 interface FieldRef {
     ref?: HTMLElement | null;
     name: string;
-    options?: RegisterOptions;
+    options?: RegisterOptions<any, any>;
 }
 
 // ============================================================================
@@ -680,145 +701,277 @@ function cloneDeep<T>(value: T): T {
     return result;
 }
 
+type AnyRegisterOptions = RegisterOptions<any, any>;
+type ValidationRulesMap<T extends Record<string, any>> = Partial<Record<string, RegisterOptions<any, T>>>;
+
+function isEmptyValue(value: any): boolean {
+    if (value === undefined || value === null) return true;
+    if (typeof value === 'string' && value === '') return true;
+    if (Array.isArray(value) && value.length === 0) return true;
+    return false;
+}
+
+function normalizeNumericRule(rule?: NumericRule) {
+    if (rule === undefined) return undefined;
+    if (typeof rule === 'object' && rule !== null && 'value' in rule) {
+        return { value: rule.value, message: rule.message };
+    }
+    return { value: rule };
+}
+
+function normalizeRequiredRule(rule?: RequiredRule) {
+    if (rule === undefined) return undefined;
+    if (typeof rule === 'string') {
+        return { value: true, message: rule };
+    }
+    if (typeof rule === 'boolean') {
+        return { value: rule };
+    }
+    return { value: rule.value, message: rule.message };
+}
+
+function normalizePatternRule(rule?: PatternRule) {
+    if (!rule) return undefined;
+    if (rule instanceof RegExp) {
+        return { value: rule };
+    }
+    return rule;
+}
+
+function normalizeValidateOption(
+    validate?: ValidateFunction<any, any> | Record<string, ValidateFunction<any, any>>
+): Record<string, ValidateFunction<any, any>> | undefined {
+    if (!validate) return undefined;
+    if (typeof validate === 'function') {
+        return { $default: validate };
+    }
+    return validate;
+}
+
+function mergeValidateOptions(
+    base?: ValidateFunction<any, any> | Record<string, ValidateFunction<any, any>>,
+    override?: ValidateFunction<any, any> | Record<string, ValidateFunction<any, any>>
+): ValidateFunction<any, any> | Record<string, ValidateFunction<any, any>> | undefined {
+    if (!base) return override;
+    if (!override) return base;
+
+    const baseRecord = normalizeValidateOption(base) ?? {};
+    const overrideRecord = normalizeValidateOption(override) ?? {};
+
+    const merged: Record<string, ValidateFunction<any, any>> = { ...baseRecord };
+    for (const [key, fn] of Object.entries(overrideRecord)) {
+        if (merged[key]) {
+            let suffix = 1;
+            let candidate = `${key}_${suffix}`;
+            while (merged[candidate]) {
+                suffix++;
+                candidate = `${key}_${suffix}`;
+            }
+            merged[candidate] = fn;
+        } else {
+            merged[key] = fn;
+        }
+    }
+
+    return merged;
+}
+
+function mergeDeps(base?: string[], override?: string[]): string[] | undefined {
+    if (!base && !override) return undefined;
+    const combined = [...(base ?? []), ...(override ?? [])];
+    const unique = Array.from(new Set(combined.filter(Boolean)));
+    return unique.length ? unique : undefined;
+}
+
+function mergeRegisterOptions(
+    base?: AnyRegisterOptions,
+    override?: AnyRegisterOptions
+): AnyRegisterOptions | undefined {
+    if (!base) return override;
+    if (!override) return base;
+
+    const merged: AnyRegisterOptions = { ...base, ...override };
+    merged.validate = mergeValidateOptions(base.validate, override.validate);
+    merged.deps = mergeDeps(base.deps, override.deps);
+    return merged;
+}
+
+function normalizeFieldPathKey(path: string): string {
+    return path
+        .split('.')
+        .map(segment => (/^\d+$/.test(segment) ? '*' : segment))
+        .join('.');
+}
+
+function resolveValidationRule<T extends Record<string, any>>(
+    fieldName: string,
+    rules?: ValidationRulesMap<T>
+): RegisterOptions<any, T> | undefined {
+    if (!rules) return undefined;
+    if (rules[fieldName]) {
+        return rules[fieldName];
+    }
+
+    const wildcardKey = normalizeFieldPathKey(fieldName);
+    return rules[wildcardKey] ?? undefined;
+}
+
+function createErrorCollector(criteriaMode: 'firstError' | 'all') {
+    let currentError: FieldError | undefined;
+
+    return {
+        add(type: string, message: string) {
+            if (!currentError) {
+                currentError = { type, message };
+                if (criteriaMode === 'all') {
+                    currentError.types = { [type]: message };
+                }
+                return criteriaMode === 'firstError';
+            }
+
+            if (criteriaMode === 'all') {
+                currentError.types = currentError.types ?? { [currentError.type]: currentError.message };
+                currentError.types[type] = message;
+                return false;
+            }
+
+            return true;
+        },
+        get() {
+            return currentError;
+        },
+    };
+}
+
 // ============================================================================
 // Field Validation
 // ============================================================================
 
-async function validateField<T>(
-    value: T,
-    options?: RegisterOptions<T>
+async function validateField<TFieldValue, TFormValues extends Record<string, any>>(
+    value: TFieldValue,
+    options: RegisterOptions<TFieldValue, TFormValues> | undefined,
+    context: Omit<FieldValidationContext<TFormValues>, 'value'>,
+    criteriaMode: 'firstError' | 'all'
 ): Promise<FieldError | undefined> {
     if (!options) return undefined;
 
-    // Required
-    if (options.required) {
-        const isEmpty = value === undefined || value === null || value === '' ||
-            (Array.isArray(value) && value.length === 0);
-        if (isEmpty) {
-            return {
-                type: 'required',
-                message: typeof options.required === 'string'
-                    ? options.required
-                    : 'This field is required',
-            };
-        }
-    }
+    const collector = createErrorCollector(criteriaMode);
+    const validationContext: FieldValidationContext<TFormValues> = { ...context, value };
 
-    if (value === undefined || value === null || value === '') {
+    const requiredRule = normalizeRequiredRule(options.required);
+    const isValueEmpty = isEmptyValue(value);
+
+    if (requiredRule?.value) {
+        if (isValueEmpty) {
+            collector.add('required', requiredRule.message ?? 'This field is required');
+            return collector.get();
+        }
+    } else if (isValueEmpty) {
         return undefined;
     }
 
-    // Min
-    if (options.min !== undefined) {
-        const min = typeof options.min === 'object' ? options.min.value : options.min;
-        const message = typeof options.min === 'object' ? options.min.message : `Minimum value is ${min}`;
+    const numericRules: Array<{ option?: NumericRule; type: string; comparator: (ruleValue: number, current: number) => boolean; defaultMessage: (ruleValue: number) => string }> = [
+        {
+            option: options.min,
+            type: 'min',
+            comparator: (ruleValue, current) => current < ruleValue,
+            defaultMessage: (ruleValue) => `Minimum value is ${ruleValue}`,
+        },
+        {
+            option: options.max,
+            type: 'max',
+            comparator: (ruleValue, current) => current > ruleValue,
+            defaultMessage: (ruleValue) => `Maximum value is ${ruleValue}`,
+        },
+    ];
 
-        const numValue = typeof value === 'number' ? value : Number(value);
-        if (!isNaN(numValue) && numValue < min) {
-            return { type: 'min', message };
-        }
-    }
-
-    // Max
-    if (options.max !== undefined) {
-        const max = typeof options.max === 'object' ? options.max.value : options.max;
-        const message = typeof options.max === 'object' ? options.max.message : `Maximum value is ${max}`;
-
-        const numValue = typeof value === 'number' ? value : Number(value);
-        if (!isNaN(numValue) && numValue > max) {
-            return { type: 'max', message };
-        }
-    }
-
-    // MinLength
-    if (options.minLength !== undefined && typeof value === 'string') {
-        const minLength = typeof options.minLength === 'object' ? options.minLength.value : options.minLength;
-        const message = typeof options.minLength === 'object'
-            ? options.minLength.message
-            : `Minimum length is ${minLength}`;
-
-        if (value.length < minLength) {
-            return { type: 'minLength', message };
-        }
-    }
-
-    // MaxLength
-    if (options.maxLength !== undefined && typeof value === 'string') {
-        const maxLength = typeof options.maxLength === 'object' ? options.maxLength.value : options.maxLength;
-        const message = typeof options.maxLength === 'object'
-            ? options.maxLength.message
-            : `Maximum length is ${maxLength}`;
-
-        if (value.length > maxLength) {
-            return { type: 'maxLength', message };
-        }
-    }
-
-    // Pattern
-    if (options.pattern !== undefined && typeof value === 'string') {
-        const pattern = options.pattern instanceof RegExp ? options.pattern : options.pattern.value;
-        const message = options.pattern instanceof RegExp
-            ? 'Invalid format'
-            : options.pattern.message;
-
-        if (!pattern.test(value)) {
-            return { type: 'pattern', message };
-        }
-    }
-
-    // Custom validate
-    if (options.validate) {
-        if (typeof options.validate === 'function') {
-            const result = await options.validate(value);
-            if (result !== true) {
-                return {
-                    type: 'validate',
-                    message: typeof result === 'string' ? result : 'Validation failed',
-                };
-            }
-        } else {
-            for (const [key, validateFn] of Object.entries(options.validate)) {
-                const result = await validateFn(value);
-                if (result !== true) {
-                    return {
-                        type: key,
-                        message: typeof result === 'string' ? result : 'Validation failed',
-                    };
+    for (const numericRule of numericRules) {
+        if (numericRule.option !== undefined) {
+            const rule = normalizeNumericRule(numericRule.option);
+            if (rule) {
+                const numericValue = typeof value === 'number' ? value : Number(value);
+                if (!isNaN(numericValue) && numericRule.comparator(rule.value, numericValue)) {
+                    const shouldStop = collector.add(
+                        numericRule.type,
+                        rule.message ?? numericRule.defaultMessage(rule.value)
+                    );
+                    if (shouldStop) {
+                        return collector.get();
+                    }
                 }
             }
         }
     }
 
-    return undefined;
-}
+    const lengthRules: Array<{ option?: NumericRule; type: string; predicate: (length: number, ruleValue: number) => boolean; defaultMessage: (ruleValue: number) => string }> = [
+        {
+            option: options.minLength,
+            type: 'minLength',
+            predicate: (length, ruleValue) => length < ruleValue,
+            defaultMessage: (ruleValue) => `Minimum length is ${ruleValue}`,
+        },
+        {
+            option: options.maxLength,
+            type: 'maxLength',
+            predicate: (length, ruleValue) => length > ruleValue,
+            defaultMessage: (ruleValue) => `Maximum length is ${ruleValue}`,
+        },
+    ];
 
-// ============================================================================
-// Schema Integration
-// ============================================================================
-
-function validateWithSchema<T>(
-    schema: Schema<T>,
-    values: T
-): FieldErrors<T> {
-    const result = schema.safeParse(values);
-
-    if (result.success) {
-        return {};
-    }
-
-    const errors: FieldErrors<T> = {};
-
-    for (const error of result.errors) {
-        const path = error.path.join('.') || 'root';
-        if (!errors[path as keyof T]) {
-            errors[path as keyof T] = {
-                type: error.code,
-                message: error.message,
-            };
+    for (const lengthRule of lengthRules) {
+        if (lengthRule.option !== undefined && value !== undefined && value !== null) {
+            const rule = normalizeNumericRule(lengthRule.option);
+            if (rule) {
+                const currentLength = (value as any).length;
+                if (typeof currentLength === 'number' && lengthRule.predicate(currentLength, rule.value)) {
+                    const shouldStop = collector.add(
+                        lengthRule.type,
+                        rule.message ?? lengthRule.defaultMessage(rule.value)
+                    );
+                    if (shouldStop) {
+                        return collector.get();
+                    }
+                }
+            }
         }
     }
 
-    return errors;
+    if (options.pattern !== undefined && typeof value === 'string') {
+        const patternRule = normalizePatternRule(options.pattern);
+        if (patternRule && !patternRule.value.test(value)) {
+            const shouldStop = collector.add('pattern', patternRule.message ?? 'Invalid format');
+            if (shouldStop) {
+                return collector.get();
+            }
+        }
+    }
+
+    const validateEntries = normalizeValidateOption(options.validate);
+    if (validateEntries) {
+        for (const [key, validateFn] of Object.entries(validateEntries)) {
+            const result = await validateFn(value, validationContext);
+            if (result !== true) {
+                let message = 'Validation failed';
+                let type = key || 'validate';
+
+                if (typeof result === 'string') {
+                    message = result;
+                } else if (result && typeof result === 'object') {
+                    message = result.message ?? message;
+                    if (result.type) {
+                        type = result.type;
+                    }
+                }
+
+                const shouldStop = collector.add(type, message);
+                if (shouldStop) {
+                    return collector.get();
+                }
+            }
+        }
+    }
+
+    return collector.get();
 }
 
 // ============================================================================
@@ -920,9 +1073,9 @@ export function useForm<T extends Record<string, any>>(
         criteriaMode = 'firstError',
         shouldFocusError = true,
         delayError,
-        schema,
         resolver,
         disabled = false,
+        validationRules,
     } = config;
 
     // Resolve default values
@@ -956,6 +1109,23 @@ export function useForm<T extends Record<string, any>>(
     const fields = new Map<string, FieldRef>();
     const watchCallbacks = new Set<(data: T, info: { name?: keyof T; type?: string }) => void>();
 
+    const validationRuleMap: ValidationRulesMap<T> | undefined = validationRules
+        ? Object.entries(validationRules).reduce((acc, [key, value]) => {
+            if (value) {
+                acc[key] = value as RegisterOptions<any, T>;
+            }
+            return acc;
+        }, {} as ValidationRulesMap<T>)
+        : undefined;
+
+    const getMergedOptions = (
+        fieldName: string,
+        local?: RegisterOptions<any, T>
+    ): RegisterOptions<any, T> | undefined => {
+        const preset = resolveValidationRule(fieldName, validationRuleMap);
+        return mergeRegisterOptions(preset, local);
+    };
+
     // Update values when controlled values change
     if (controlledValues) {
         createEffect(() => {
@@ -985,19 +1155,17 @@ export function useForm<T extends Record<string, any>>(
     // Validation
     const validateFieldInternal = async (name: string): Promise<FieldError | undefined> => {
         const field = fields.get(name);
-        const value = getByPath(values(), name);
+        const currentValues = values();
+        const value = getByPath(currentValues, name);
+        const snapshot = formState();
 
-        // First check field-level validation
-        const fieldError = await validateField(value, field?.options);
-        if (fieldError) return fieldError;
-
-        // Then check schema validation for this field
-        if (schema) {
-            const schemaErrors = validateWithSchema(schema, values());
-            return schemaErrors[name as keyof T];
-        }
-
-        return undefined;
+        return validateField(value, field?.options as RegisterOptions<any, T>, {
+            name,
+            values: currentValues,
+            formState: snapshot,
+            getValue: (path) => getByPath(currentValues, path as string),
+            options: field?.options as RegisterOptions<any, T> | undefined,
+        }, criteriaMode);
     };
 
     const validateForm = async (): Promise<FieldErrors<T>> => {
@@ -1011,15 +1179,20 @@ export function useForm<T extends Record<string, any>>(
                 const result = await resolver(values());
                 allErrors = result.errors;
             }
-            // Schema validation
-            else if (schema) {
-                allErrors = validateWithSchema(schema, values());
-            }
+
+            const currentValues = values();
+            const snapshot = formState();
 
             // Field-level validation (runs even with schema)
             for (const [name, field] of fields) {
                 if (!allErrors[name as keyof T]) {
-                    const error = await validateField(getByPath(values(), name), field.options);
+                    const error = await validateField(getByPath(currentValues, name), field.options as RegisterOptions<any, T>, {
+                        name,
+                        values: currentValues,
+                        formState: snapshot,
+                        getValue: (path) => getByPath(currentValues, path as string),
+                        options: field.options as RegisterOptions<any, T> | undefined,
+                    }, criteriaMode);
                     if (error) {
                         allErrors[name as keyof T] = error;
                     }
@@ -1056,7 +1229,7 @@ export function useForm<T extends Record<string, any>>(
     };
 
     // Get value from input
-    const getInputValue = (event: Event, options?: RegisterOptions): any => {
+    const getInputValue = (event: Event, options?: RegisterOptions<any, T>): any => {
         const target = event.target as HTMLInputElement;
 
         if (!target) return undefined;
@@ -1091,23 +1264,26 @@ export function useForm<T extends Record<string, any>>(
     // Register a field
     const register = <K extends keyof T | string>(
         name: K,
-        options?: RegisterOptions<PathValue<T, K & string>>
+        options?: RegisterOptions<PathValue<T, K & string>, T>
     ): UseFormRegisterReturn => {
         const fieldName = name as string;
+        const mergedOptions = getMergedOptions(fieldName, options as RegisterOptions<any, T>);
 
         // Store field reference
         fields.set(fieldName, {
             name: fieldName,
-            options: options as RegisterOptions,
+            options: mergedOptions as RegisterOptions<any, any>,
         });
 
         const onChange = async (event: Event) => {
-            const inputValue = getInputValue(event, options);
+            const inputValue = getInputValue(event, mergedOptions);
+            console.log('[form.ts onChange] field:', fieldName, 'value:', inputValue);
 
             batch(() => {
                 // Update value
                 const prevVals = values();
                 const nextVals = setByPath(prevVals, fieldName, inputValue);
+                console.log('[form.ts onChange] setting values from', prevVals, 'to', nextVals);
                 setValues(nextVals as T);
 
                 // Mark as dirty
@@ -1122,6 +1298,8 @@ export function useForm<T extends Record<string, any>>(
                     });
                 }
             });
+
+            console.log('[form.ts onChange] after batch, values():', values());
 
             // Notify watchers
             for (const callback of watchCallbacks) {
@@ -1143,8 +1321,8 @@ export function useForm<T extends Record<string, any>>(
             }
 
             // Validate dependent fields
-            if (options?.deps) {
-                for (const dep of options.deps) {
+            if (mergedOptions?.deps) {
+                for (const dep of mergedOptions.deps) {
                     if (shouldValidate(dep, 'change')) {
                         const error = await validateFieldInternal(dep);
                         setErrors(prev => {
@@ -1161,7 +1339,7 @@ export function useForm<T extends Record<string, any>>(
             }
 
             // Call user's onChange
-            options?.onChange?.(event);
+            mergedOptions?.onChange?.(event);
         };
 
         const onBlur = async (event: Event) => {
@@ -1182,8 +1360,26 @@ export function useForm<T extends Record<string, any>>(
                 });
             }
 
+            // Validate dependent fields on blur when requested
+            if (mergedOptions?.deps) {
+                for (const dep of mergedOptions.deps) {
+                    if (shouldValidate(dep, 'blur')) {
+                        const error = await validateFieldInternal(dep);
+                        setErrors(prev => {
+                            if (error) {
+                                return { ...prev, [dep]: error };
+                            } else {
+                                const next = { ...prev };
+                                delete next[dep as keyof T];
+                                return next;
+                            }
+                        });
+                    }
+                }
+            }
+
             // Call user's onBlur
-            options?.onBlur?.(event);
+            mergedOptions?.onBlur?.(event);
         };
 
         const ref = (element: HTMLElement | null) => {
@@ -1191,31 +1387,27 @@ export function useForm<T extends Record<string, any>>(
             if (field) {
                 field.ref = element;
             }
-        };
 
-        // Reactive value getter for text inputs, selects, etc.
-        const value = () => {
-            const currentValues = values();
-            const v = getByPath(currentValues, fieldName);
-            return v ?? '';
-        };
+            // Set initial value from defaultValues only on mount
+            if (element && 'value' in element) {
+                const defaultValue = getByPath(defaultValues, fieldName);
+                const inputEl = element as HTMLInputElement;
 
-        // Reactive checked getter for checkboxes
-        const checked = () => {
-            const currentValues = values();
-            const v = getByPath(currentValues, fieldName);
-            return Boolean(v);
+                if (inputEl.type === 'checkbox' || inputEl.type === 'radio') {
+                    inputEl.checked = Boolean(defaultValue);
+                } else if (defaultValue !== undefined) {
+                    inputEl.value = String(defaultValue);
+                }
+            }
         };
 
         return {
             name: fieldName,
             ref,
-            onChange,
+            onInput: onChange,  // Use onInput for real-time updates while typing
+            onChange,           // Also keep onChange for select, checkbox, etc.
             onBlur,
-            onInput: onChange, // Also bind onInput for immediate updates
-            value,
-            checked,
-            disabled: options?.disabled || formDisabled(),
+            disabled: mergedOptions?.disabled || formDisabled(),
         };
     };
 
@@ -1608,15 +1800,15 @@ export function useForm<T extends Record<string, any>>(
         _setFieldValue: (name: string, value: any) => {
             setValues(prev => setByPath(prev, name, value));
         },
-        _register: (name: string, options?: RegisterOptions) => {
-            fields.set(name, { name, options });
+        _register: (name: string, options?: RegisterOptions<any, T>) => {
+            const merged = getMergedOptions(name, options);
+            fields.set(name, { name, options: merged as RegisterOptions<any, any> });
         },
         _unregister: (name: string) => {
             fields.delete(name);
         },
         _fields: fields,
         _defaultValues: defaultValues,
-        _schema: schema,
     };
 
     return {
@@ -1636,6 +1828,13 @@ export function useForm<T extends Record<string, any>>(
         setFocus,
         trigger,
         control,
+        // Direct signal accessors for reactive tracking
+        isSubmitting,
+        isSubmitted,
+        isSubmitSuccessful,
+        isDirty,
+        isValid,
+        isValidating,
     };
 }
 
@@ -1980,7 +2179,7 @@ export function useFormState<T extends Record<string, any>>(
 export interface UseControllerConfig<T extends Record<string, any>, K extends keyof T> {
     control: FormControl<T>;
     name: K;
-    rules?: RegisterOptions<T[K]>;
+    rules?: RegisterOptions<T[K], T>;
     shouldUnregister?: boolean;
     defaultValue?: T[K];
 }
@@ -2081,37 +2280,6 @@ export interface FormProps<T extends Record<string, any>> {
 }
 
 // ============================================================================
-// Schema Resolver
-// ============================================================================
-
-/** Create a resolver from a schema */
-export function schemaResolver<T extends Record<string, any>>(
-    schema: Schema<T>
-): FormResolver<T> {
-    return (values: T) => {
-        const result = schema.safeParse(values);
-
-        if (result.success) {
-            return { values: result.data, errors: {} };
-        }
-
-        const errors: FieldErrors<T> = {};
-
-        for (const error of result.errors) {
-            const path = error.path.join('.') || 'root';
-            if (!errors[path as keyof T]) {
-                errors[path as keyof T] = {
-                    type: error.code,
-                    message: error.message,
-                };
-            }
-        }
-
-        return { values: {} as T, errors };
-    };
-}
-
-// ============================================================================
 // Default Export
 // ============================================================================
 
@@ -2121,5 +2289,4 @@ export default {
     useWatch,
     useFormState,
     useController,
-    schemaResolver,
 };

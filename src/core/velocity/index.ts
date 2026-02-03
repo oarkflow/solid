@@ -208,7 +208,6 @@ export {
     useWatch,
     useFormState,
     useController,
-    schemaResolver,
 } from './form';
 
 export type {
@@ -239,53 +238,6 @@ export type {
     FormProps,
     FieldArrayField,
 } from './form';
-
-// ============================================================================
-// Schema Validation (zod-like)
-// ============================================================================
-
-export {
-    v,
-    Schema,
-    ValidationException,
-    IssueCodes,
-
-    // Schema classes
-    StringSchema,
-    NumberSchema,
-    BooleanSchema,
-    DateSchema,
-    ArraySchema,
-    ObjectSchema,
-    EnumSchema,
-    NativeEnumSchema,
-    LiteralSchema,
-    UnionSchema,
-    DiscriminatedUnionSchema,
-    TupleSchema,
-    RecordSchema,
-    AnySchema,
-    UnknownSchema,
-    NeverSchema,
-    VoidSchema,
-    NullSchema,
-    UndefinedSchema,
-    IntersectionSchema,
-    LazySchema,
-    PreprocessSchema,
-    CoercedStringSchema,
-    CoercedNumberSchema,
-    CoercedBooleanSchema,
-    CoercedDateSchema,
-} from './schema';
-
-export type {
-    ValidationError,
-    ParseResult,
-    IssueCode,
-    infer as SchemaInfer,
-    input as SchemaInput,
-} from './schema';
 
 // ============================================================================
 // JSX Factory (for TypeScript/Babel)

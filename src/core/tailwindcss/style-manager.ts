@@ -87,6 +87,7 @@ export const StyleManager = {
             case 'hover': rule = `.${selector}:hover { ${body} }`; break;
             case 'focus': rule = `.${selector}:focus { ${body} }`; break;
             case 'active': rule = `.${selector}:active { ${body} }`; break;
+            case 'disabled': rule = `.${selector}:disabled { ${body} }`; break;
             case 'dark': rule = `.dark .${selector}, [data-theme="dark"] .${selector}, .dark.${selector}, [data-theme="dark"].${selector}, html.dark .${selector}, html[data-theme="dark"] .${selector} { ${body} }`; break;
             case 'sm': rule = `@media (min-width: 640px) { .${selector} { ${body} } }`; break;
             case 'md': rule = `@media (min-width: 768px) { .${selector} { ${body} } }`; break;

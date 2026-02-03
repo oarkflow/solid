@@ -56,6 +56,15 @@ const routes = [
         },
     },
     {
+        path: '/form-demo',
+        component: DemoForm,
+        meta: {
+            title: 'Form Demo',
+            description: 'Minimal form testing page.',
+            canonical: '/form-demo',
+        },
+    },
+    {
         path: '/form-test',
         component: FormTestPage,
         meta: {
@@ -146,6 +155,7 @@ const { Router } = createRouter(routes, routerOptions);
 registerRouterApi(useRouter());
 
 import { createEffect } from '@/core/velocity';
+import { DemoForm } from './app/pages/DemoForm';
 
 export const App: FC = () => {
     // Apply theme to html element reactively

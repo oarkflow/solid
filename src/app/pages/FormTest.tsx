@@ -12,10 +12,6 @@ export const FormTestPage: FC = () => {
         defaultValues: { name: '', agree: false },
     });
 
-    // Store register result once
-    const nameField = form.register('name');
-    const agreeField = form.register('agree');
-
     // Debug effect
     createEffect(() => {
         console.log('[Effect] form values changed:', form.getValues());
@@ -42,19 +38,18 @@ export const FormTestPage: FC = () => {
 
             {/* Test 2: useForm - Text Input */}
             <div class="p-4 border-2 border-blue-300 rounded">
-                <h2 class="font-semibold mb-2 text-blue-700">Test 2: useForm Text Input</h2>
+                <h2 class="font-semibold mb-2 text-blue-700">Test 2: useForm Text Input (Manual)</h2>
                 <input
+                    {...form.register('name')}
                     type="text"
                     class="border p-2 w-full rounded"
                     placeholder="Type here..."
-                    value={nameField.value}
                     onInput={(e: any) => {
-                        console.log('[Test2] onInput fired, value:', e.target.value);
-                        nameField.onInput?.(e);
+                        console.log('[Test2] onChange fired, value:', e.target.value);
                     }}
                 />
                 <p class="mt-2 text-sm bg-blue-100 p-2 rounded">
-                    nameField.value(): <strong>{nameField.value}</strong>
+                    form.getValues('name'): <strong>{() => String(form.getValues('name') || '')}</strong>
                 </p>
                 <p class="text-sm bg-blue-50 p-2 rounded mt-1">
                     getValues(): <strong>{() => JSON.stringify(form.getValues())}</strong>
@@ -66,18 +61,17 @@ export const FormTestPage: FC = () => {
                 <h2 class="font-semibold mb-2 text-green-700">Test 3: useForm Checkbox</h2>
                 <label class="flex items-center gap-2">
                     <input
+                        {...form.register('agree')}
                         type="checkbox"
                         class="w-5 h-5"
-                        checked={agreeField.checked}
                         onChange={(e: any) => {
                             console.log('[Test3] onChange fired, checked:', e.target.checked);
-                            agreeField.onChange?.(e);
                         }}
                     />
                     <span>I agree to terms</span>
                 </label>
                 <p class="mt-2 text-sm bg-green-100 p-2 rounded">
-                    agreeField.checked(): <strong>{() => String(agreeField.checked())}</strong>
+                    form.getValues('agree'): <strong>{() => String(form.getValues('agree'))}</strong>
                 </p>
             </div>
 
