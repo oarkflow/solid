@@ -1104,30 +1104,33 @@ export const iconDefinitions: Record<string, IconDefinition> = {
     ],
 
     // Battery
+
+
+    // Battery
     Battery: [
-        rectToIconNode(7, 6, 10, 16, { rx: 2 }),
-        lineToIconNode(9, 4, 15, 4),
+        rectToIconNode(2, 7, 16, 10, { rx: 2 }),
+        lineToIconNode(22, 11, 22, 13),
     ],
 
     BatteryFull: [
-        rectToIconNode(7, 6, 10, 16, { rx: 2 }),
-        lineToIconNode(9, 4, 15, 4),
-        rectToIconNode(9, 8, 6, 3, { fill: 'currentColor' }),
-        rectToIconNode(9, 12, 6, 3, { fill: 'currentColor' }),
-        rectToIconNode(9, 16, 6, 3, { fill: 'currentColor' }),
+        rectToIconNode(2, 7, 16, 10, { rx: 2 }),
+        lineToIconNode(22, 11, 22, 13),
+        rectToIconNode(4, 9, 3, 6, { fill: 'currentColor' }),
+        rectToIconNode(8, 9, 3, 6, { fill: 'currentColor' }),
+        rectToIconNode(12, 9, 3, 6, { fill: 'currentColor' }),
     ],
 
     BatteryMedium: [
-        rectToIconNode(7, 6, 10, 16, { rx: 2 }),
-        lineToIconNode(9, 4, 15, 4),
-        rectToIconNode(9, 12, 6, 3, { fill: 'currentColor' }),
-        rectToIconNode(9, 16, 6, 3, { fill: 'currentColor' }),
+        rectToIconNode(2, 7, 16, 10, { rx: 2 }),
+        lineToIconNode(22, 11, 22, 13),
+        rectToIconNode(4, 9, 3, 6, { fill: 'currentColor' }),
+        rectToIconNode(8, 9, 3, 6, { fill: 'currentColor' }),
     ],
 
     BatteryLow: [
-        rectToIconNode(7, 6, 10, 16, { rx: 2 }),
-        lineToIconNode(9, 4, 15, 4),
-        rectToIconNode(9, 16, 6, 3, { fill: 'currentColor' }),
+        rectToIconNode(2, 7, 16, 10, { rx: 2 }),
+        lineToIconNode(22, 11, 22, 13),
+        rectToIconNode(4, 9, 3, 6, { fill: 'currentColor' }),
     ],
 
     BatteryCharging: [
