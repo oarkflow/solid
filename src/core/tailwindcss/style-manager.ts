@@ -54,18 +54,23 @@ export const StyleManager = {
             return null;
         };
 
-        // Escape class name for CSS selector
-        const selector = className
-            .replace(/:/g, '\\:')
-            .replace(/\[/g, '\\[')
-            .replace(/\]/g, '\\]')
-            .replace(/\//g, '\\/')
-            .replace(/#/g, '\\#')
-            .replace(/\(/g, '\\(')
-            .replace(/\)/g, '\\)')
-            .replace(/%/g, '\\%')
-            .replace(/\./g, '\\.')
-            .replace(/,/g, '\\,');
+        // Helper to escape class name for CSS selector
+        const escapeSelector = (name: string) => {
+            return name
+                .replace(/:/g, '\\:')
+                .replace(/\[/g, '\\[')
+                .replace(/\]/g, '\\]')
+                .replace(/\//g, '\\/')
+                .replace(/#/g, '\\#')
+                .replace(/\(/g, '\\(')
+                .replace(/\)/g, '\\)')
+                .replace(/%/g, '\\%')
+                .replace(/\./g, '\\.')
+                .replace(/,/g, '\\,')
+                .replace(/!/g, '\\!');
+        };
+
+        const selector = escapeSelector(className);
 
         let rule = '';
         const important = className.startsWith('!') ? ' !important' : '';
@@ -86,9 +91,16 @@ export const StyleManager = {
         switch (modifier) {
             case 'hover': rule = `.${selector}:hover { ${body} }`; break;
             case 'focus': rule = `.${selector}:focus { ${body} }`; break;
+            case 'focus-within': rule = `.${selector}:focus-within { ${body} }`; break;
+            case 'focus-visible': rule = `.${selector}:focus-visible { ${body} }`; break;
             case 'active': rule = `.${selector}:active { ${body} }`; break;
             case 'disabled': rule = `.${selector}:disabled { ${body} }`; break;
-            case 'dark': rule = `.dark .${selector}, [data-theme="dark"] .${selector}, .dark.${selector}, [data-theme="dark"].${selector}, html.dark .${selector}, html[data-theme="dark"] .${selector} { ${body} }`; break;
+            case 'checked': rule = `.${selector}:checked { ${body} }`; break;
+            case 'peer-checked': rule = `.peer:checked ~ .${selector} { ${body} }`; break;
+            case 'peer-focus': rule = `.peer:focus ~ .${selector} { ${body} }`; break;
+            case 'group-hover': rule = `.group:hover .${selector} { ${body} }`; break;
+            case 'group-focus': rule = `.group:focus .${selector} { ${body} }`; break;
+            case 'dark': rule = `.dark .${selector}, .dark.${selector} { ${body} }`; break;
             case 'sm': rule = `@media (min-width: 640px) { .${selector} { ${body} } }`; break;
             case 'md': rule = `@media (min-width: 768px) { .${selector} { ${body} } }`; break;
             case 'lg': rule = `@media (min-width: 1024px) { .${selector} { ${body} } }`; break;
@@ -114,7 +126,23 @@ export const StyleManager = {
         this.init();
         if (!this.styleTag) return;
 
-        const selector = className.replace(/:/g, '\\:');
+        // Re-use escape logic
+        const escapeSelector = (name: string) => {
+            return name
+                .replace(/:/g, '\\:')
+                .replace(/\[/g, '\\[')
+                .replace(/\]/g, '\\]')
+                .replace(/\//g, '\\/')
+                .replace(/#/g, '\\#')
+                .replace(/\(/g, '\\(')
+                .replace(/\)/g, '\\)')
+                .replace(/%/g, '\\%')
+                .replace(/\./g, '\\.')
+                .replace(/,/g, '\\,')
+                .replace(/!/g, '\\!');
+        };
+
+        const selector = escapeSelector(className);
         const childRule = `.${selector} > * + * { ${Object.entries(childStyles).map(([p, v]) =>
             `${p.replace(/([A-Z])/g, '-$1').toLowerCase()}: ${v}`
         ).join('; ')}; }`;

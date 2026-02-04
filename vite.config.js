@@ -54,6 +54,14 @@ export default defineConfig(({ command, mode, ssrBuild }) => ({
                 return 'tailwindcss';
             }
 
+            if (normalized.includes('/src/core/ui/')) {
+                return 'ui';
+            }
+
+            if (normalized.includes('/src/core/icons/')) {
+                return 'icons';
+            }
+
             if (normalized.includes('/src/') && !normalized.includes('/src/core/velocity/') && !normalized.includes('/src/core/tailwindcss/')) {
                 return 'app';
             }

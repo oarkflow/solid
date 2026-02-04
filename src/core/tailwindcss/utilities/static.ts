@@ -284,6 +284,14 @@ export const staticUtilities: Record<string, any> = {
     'filter-none': { filter: 'none' },
     'backdrop-filter': { backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
     'backdrop-filter-none': { backdropFilter: 'none' },
+    'backdrop-blur-none': { '--tw-backdrop-blur': 'blur(0)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-sm': { '--tw-backdrop-blur': 'blur(4px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur': { '--tw-backdrop-blur': 'blur(8px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-md': { '--tw-backdrop-blur': 'blur(12px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-lg': { '--tw-backdrop-blur': 'blur(16px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-xl': { '--tw-backdrop-blur': 'blur(24px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-2xl': { '--tw-backdrop-blur': 'blur(40px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
+    'backdrop-blur-3xl': { '--tw-backdrop-blur': 'blur(64px)', backdropFilter: 'var(--tw-backdrop-blur) var(--tw-backdrop-brightness) var(--tw-backdrop-contrast) var(--tw-backdrop-grayscale) var(--tw-backdrop-hue-rotate) var(--tw-backdrop-invert) var(--tw-backdrop-opacity) var(--tw-backdrop-saturate) var(--tw-backdrop-sepia)' },
 
     // Object fit
     'object-contain': { objectFit: 'contain' },
@@ -322,6 +330,27 @@ export const staticUtilities: Record<string, any> = {
     // Visibility
     'visible': { visibility: 'visible' },
     'invisible': { visibility: 'hidden' },
+    'sr-only': {
+        position: 'absolute',
+        width: '1px',
+        height: '1px',
+        padding: '0',
+        margin: '-1px',
+        overflow: 'hidden',
+        clip: 'rect(0, 0, 0, 0)',
+        whiteSpace: 'nowrap',
+        borderWidth: '0'
+    },
+
+    // Z-Index
+    'z-0': { zIndex: '0' },
+    'z-10': { zIndex: '10' },
+    'z-20': { zIndex: '20' },
+    'z-30': { zIndex: '30' },
+    'z-40': { zIndex: '40' },
+    'z-50': { zIndex: '50' },
+    'z-auto': { zIndex: 'auto' },
+
 
     // Isolation
     'isolate': { isolation: 'isolate' },

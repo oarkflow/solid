@@ -147,7 +147,7 @@ export const TailwindEngine = {
             if (important) current = current.slice(1);
 
             // Extract modifier: hover:bg-red-500 -> hover, bg-red-500
-            const modMatch = current.match(/^([a-z0-9]+):(.+)$/);
+            const modMatch = current.match(/^([a-z0-9-]+):(.+)$/);
             if (modMatch) {
                 modifier = modMatch[1];
                 current = modMatch[2];

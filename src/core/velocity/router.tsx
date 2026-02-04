@@ -534,7 +534,7 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
                 return 'blocked';
             }
             if (typeof outcome === 'string') {
-                queueMicrotask(() => navigate(outcome, { replace: true }));
+                setTimeout(() => navigate(outcome, { replace: true }), 0);
                 return 'redirected';
             }
         }
@@ -573,7 +573,7 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
                     if (!allowed) {
                         const fallback = route.redirectTo ?? '/login';
                         if (normalizePath(fallback) !== currentPath) {
-                            queueMicrotask(() => navigate(fallback, { replace: true }));
+                            setTimeout(() => navigate(fallback, { replace: true }), 0);
                         }
                         setParams({});
                         applyMeta(undefined);

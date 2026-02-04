@@ -74,6 +74,24 @@ const routes = [
         },
     },
     {
+        path: '/icons',
+        component: IconExample,
+        meta: {
+            title: 'Icons',
+            description: 'Showcase of all icons.',
+            canonical: '/icons',
+        },
+    },
+    {
+        path: '/components',
+        component: ComponentShowcase,
+        meta: {
+            title: 'Components',
+            description: 'Showcase of all components.',
+            canonical: '/components',
+        },
+    },
+    {
         path: '/dashboard',
         component: DashboardPage,
         guard: () => isAuthenticated(),
@@ -156,6 +174,9 @@ registerRouterApi(useRouter());
 
 import { createEffect } from '@/core/velocity';
 import { DemoForm } from './app/pages/DemoForm';
+import { ComponentShowcase } from './app/pages/ComponentShowcase';
+import { ToastContainer } from '@/core/ui';
+import IconExample from './app/pages/example';
 
 export const App: FC = () => {
     // Apply theme to html element reactively
@@ -178,6 +199,7 @@ export const App: FC = () => {
                     </div>
                 </div>
             </main>
+            <ToastContainer position="top-right" />
         </div>
     );
 };

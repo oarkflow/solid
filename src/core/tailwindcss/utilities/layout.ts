@@ -188,5 +188,42 @@ export function resolveLayoutUtility(prefix: string, value: string): Record<stri
         if (value === 'content') return { boxSizing: 'content-box' };
     }
 
+    // Place Self
+    if (prefix === 'place-self') {
+        const values: Record<string, string> = {
+            'auto': 'auto',
+            'start': 'start',
+            'end': 'end',
+            'center': 'center',
+            'stretch': 'stretch',
+        };
+        return { placeSelf: values[value] || value };
+    }
+
+    // Justify Self
+    if (prefix === 'justify-self') {
+        const values: Record<string, string> = {
+            'auto': 'auto',
+            'start': 'start',
+            'end': 'end',
+            'center': 'center',
+            'stretch': 'stretch',
+        };
+        return { justifySelf: values[value] || value };
+    }
+
+    // Align Self
+    if (prefix === 'align-self' || prefix === 'self') {
+        const values: Record<string, string> = {
+            'auto': 'auto',
+            'start': 'flex-start',
+            'end': 'flex-end',
+            'center': 'center',
+            'stretch': 'stretch',
+            'baseline': 'baseline',
+        };
+        return { alignSelf: values[value] || value };
+    }
+
     return null;
 }

@@ -1,4 +1,3 @@
-/* Normalize CSS */
 *,
 *::before,
 *::after {
@@ -627,3 +626,626 @@ dialog::backdrop {
         animation-timing-function: cubic-bezier(0,0,0.2,1);
     }
 }
+
+/* ============================================ */
+/* Headless UI Component System                */
+/* ============================================ */
+
+/* Size Variants - using CSS variables for headless components */
+.ui-size-xs-padding { padding: var(--space-1) var(--space-2); }
+.ui-size-sm-padding { padding: var(--space-2) var(--space-3); }
+.ui-size-md-padding { padding: var(--space-2) var(--space-4); }
+.ui-size-lg-padding { padding: var(--space-3) var(--space-5); }
+.ui-size-xl-padding { padding: var(--space-3) var(--space-6); }
+
+.ui-size-xs-text { font-size: var(--text-xs); }
+.ui-size-sm-text { font-size: var(--text-sm); }
+.ui-size-md-text { font-size: var(--text-base); }
+.ui-size-lg-text { font-size: var(--text-lg); }
+.ui-size-xl-text { font-size: var(--text-xl); }
+
+.ui-size-xs-height { height: var(--space-6); }
+.ui-size-sm-height { height: var(--space-8); }
+.ui-size-md-height { height: var(--space-10); }
+.ui-size-lg-height { height: var(--space-12); }
+.ui-size-xl-height { height: var(--space-16); }
+
+/* Base Component Styles */
+.ui-base {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    border-radius: var(--radius);
+    font-weight: var(--font-medium);
+    transition: all var(--transition-base) var(--transition-ease);
+    cursor: pointer;
+    border: var(--border-1) solid transparent;
+    text-decoration: none;
+}
+
+.ui-base:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--ring) / var(--opacity-50));
+}
+
+.ui-base:disabled {
+    opacity: var(--opacity-50);
+    cursor: not-allowed;
+    pointer-events: none;
+}
+
+/* Color Variants - Solid Mode */
+.ui-primary.ui-mode-solid {
+    background-color: hsl(var(--primary));
+    color: hsl(var(--primary-foreground));
+    border-color: transparent;
+}
+
+.ui-primary.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--primary) / 0.9);
+}
+
+.ui-primary.ui-mode-solid:active:not(:disabled) {
+    background-color: hsl(var(--primary) / 0.8);
+}
+
+.ui-secondary.ui-mode-solid {
+    background-color: hsl(var(--secondary));
+    color: hsl(var(--secondary-foreground));
+    border-color: transparent;
+}
+
+.ui-secondary.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--secondary) / 0.8);
+}
+
+.ui-success.ui-mode-solid {
+    background-color: hsl(var(--success));
+    color: hsl(var(--success-foreground));
+    border-color: transparent;
+}
+
+.ui-success.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--success) / 0.9);
+}
+
+.ui-destructive.ui-mode-solid {
+    background-color: hsl(var(--destructive));
+    color: hsl(var(--destructive-foreground));
+    border-color: transparent;
+}
+
+.ui-destructive.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--destructive) / 0.9);
+}
+
+.ui-warning.ui-mode-solid {
+    background-color: hsl(var(--warning));
+    color: hsl(var(--warning-foreground));
+    border-color: transparent;
+}
+
+.ui-warning.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--warning) / 0.9);
+}
+
+.ui-info.ui-mode-solid {
+    background-color: hsl(var(--info));
+    color: hsl(var(--info-foreground));
+    border-color: transparent;
+}
+
+.ui-info.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--info) / 0.9);
+}
+
+.ui-muted.ui-mode-solid {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border-color: transparent;
+}
+
+.ui-muted.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--muted) / 0.8);
+}
+
+.ui-accent.ui-mode-solid {
+    background-color: hsl(var(--accent));
+    color: hsl(var(--accent-foreground));
+    border-color: transparent;
+}
+
+.ui-accent.ui-mode-solid:hover:not(:disabled) {
+    background-color: hsl(var(--accent) / 0.8);
+}
+
+/* Color Variants - Outline Mode */
+.ui-primary.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+}
+
+.ui-primary.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--primary) / var(--opacity-10));
+}
+
+.ui-secondary.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--secondary-foreground));
+    border-color: hsl(var(--border));
+}
+
+.ui-secondary.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--secondary) / var(--opacity-50));
+}
+
+.ui-success.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--success));
+    border-color: hsl(var(--success));
+}
+
+.ui-success.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--success) / var(--opacity-10));
+}
+
+.ui-destructive.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--destructive));
+    border-color: hsl(var(--destructive));
+}
+
+.ui-destructive.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--destructive) / var(--opacity-10));
+}
+
+.ui-warning.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--warning));
+    border-color: hsl(var(--warning));
+}
+
+.ui-warning.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--warning) / var(--opacity-10));
+}
+
+.ui-info.ui-mode-outline {
+    background-color: transparent;
+    color: hsl(var(--info));
+    border-color: hsl(var(--info));
+}
+
+.ui-info.ui-mode-outline:hover:not(:disabled) {
+    background-color: hsl(var(--info) / var(--opacity-10));
+}
+
+/* Color Variants - Ghost Mode */
+.ui-primary.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--primary));
+    border-color: transparent;
+}
+
+.ui-primary.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--primary) / var(--opacity-10));
+}
+
+.ui-secondary.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--foreground));
+    border-color: transparent;
+}
+
+.ui-secondary.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--muted));
+}
+
+.ui-success.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--success));
+    border-color: transparent;
+}
+
+.ui-success.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--success) / var(--opacity-10));
+}
+
+.ui-destructive.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--destructive));
+    border-color: transparent;
+}
+
+.ui-destructive.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--destructive) / var(--opacity-10));
+}
+
+.ui-warning.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--warning));
+    border-color: transparent;
+}
+
+.ui-warning.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--warning) / var(--opacity-10));
+}
+
+.ui-info.ui-mode-ghost {
+    background-color: transparent;
+    color: hsl(var(--info));
+    border-color: transparent;
+}
+
+.ui-info.ui-mode-ghost:hover:not(:disabled) {
+    background-color: hsl(var(--info) / var(--opacity-10));
+}
+
+/* Color Variants - Subtle Mode */
+.ui-primary.ui-mode-subtle {
+    background-color: hsl(var(--primary) / var(--opacity-10));
+    color: hsl(var(--primary));
+    border-color: transparent;
+}
+
+.ui-primary.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--primary) / var(--opacity-20));
+}
+
+.ui-secondary.ui-mode-subtle {
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    border-color: transparent;
+}
+
+.ui-secondary.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--muted) / 0.8);
+}
+
+.ui-success.ui-mode-subtle {
+    background-color: hsl(var(--success) / var(--opacity-10));
+    color: hsl(var(--success));
+    border-color: transparent;
+}
+
+.ui-success.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--success) / var(--opacity-20));
+}
+
+.ui-destructive.ui-mode-subtle {
+    background-color: hsl(var(--destructive) / var(--opacity-10));
+    color: hsl(var(--destructive));
+    border-color: transparent;
+}
+
+.ui-destructive.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--destructive) / var(--opacity-20));
+}
+
+.ui-warning.ui-mode-subtle {
+    background-color: hsl(var(--warning) / var(--opacity-10));
+    color: hsl(var(--warning));
+    border-color: transparent;
+}
+
+.ui-warning.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--warning) / var(--opacity-20));
+}
+
+.ui-info.ui-mode-subtle {
+    background-color: hsl(var(--info) / var(--opacity-10));
+    color: hsl(var(--info));
+    border-color: transparent;
+}
+
+.ui-info.ui-mode-subtle:hover:not(:disabled) {
+    background-color: hsl(var(--info) / var(--opacity-20));
+}
+
+/* Link Mode */
+.ui-mode-link {
+    background-color: transparent;
+    border-color: transparent;
+    padding: 0;
+    height: auto;
+    text-decoration: underline;
+    text-underline-offset: 4px;
+}
+
+.ui-mode-link:hover:not(:disabled) {
+    opacity: var(--opacity-70);
+}
+
+.ui-primary.ui-mode-link {
+    color: hsl(var(--primary));
+}
+
+.ui-secondary.ui-mode-link {
+    color: hsl(var(--foreground));
+}
+
+.ui-destructive.ui-mode-link {
+    color: hsl(var(--destructive));
+}
+
+/* Loading State */
+.ui-loading {
+    position: relative;
+    color: transparent !important;
+    pointer-events: none;
+}
+
+.ui-loading::after {
+    content: '';
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    top: 50%;
+    left: 50%;
+    margin-left: -8px;
+    margin-top: -8px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+/* Card Component */
+.ui-card {
+    background-color: hsl(var(--card));
+    color: hsl(var(--card-foreground));
+    border: var(--border-1) solid hsl(var(--border));
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+}
+
+.ui-card-header {
+    padding: var(--space-6);
+    border-bottom: var(--border-1) solid hsl(var(--border));
+}
+
+.ui-card-body {
+    padding: var(--space-6);
+}
+
+.ui-card-footer {
+    padding: var(--space-6);
+    border-top: var(--border-1) solid hsl(var(--border));
+    background-color: hsl(var(--muted) / var(--opacity-30));
+}
+
+/* Badge Component */
+.ui-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    font-size: var(--text-xs);
+    font-weight: var(--font-medium);
+    border-radius: var(--rounded);
+    border: var(--border-1) solid transparent;
+    white-space: nowrap;
+}
+
+/* Input Component */
+.ui-input {
+    display: flex;
+    width: 100%;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    border: var(--border-1) solid hsl(var(--input));
+    border-radius: var(--radius);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    transition: border-color var(--transition-base) var(--transition-ease);
+}
+
+.ui-input:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 2px hsl(var(--ring) / var(--opacity-20));
+}
+
+.ui-input:disabled {
+    opacity: var(--opacity-50);
+    cursor: not-allowed;
+}
+
+.ui-input-error {
+    border-color: hsl(var(--destructive));
+}
+
+.ui-input-error:focus {
+    border-color: hsl(var(--destructive));
+    box-shadow: 0 0 0 2px hsl(var(--destructive) / var(--opacity-20));
+}
+
+.ui-input-success {
+    border-color: hsl(var(--success));
+}
+
+/* Select Component */
+.ui-select {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    border: var(--border-1) solid hsl(var(--input));
+    border-radius: var(--radius);
+    padding: var(--space-2) var(--space-3);
+    font-size: var(--text-sm);
+    cursor: pointer;
+    transition: border-color var(--transition-base) var(--transition-ease);
+}
+
+.ui-select:focus {
+    outline: none;
+    border-color: hsl(var(--ring));
+    box-shadow: 0 0 0 2px hsl(var(--ring) / var(--opacity-20));
+}
+
+/* Checkbox & Radio */
+.ui-checkbox,
+.ui-radio {
+    width: var(--space-4);
+    height: var(--space-4);
+    border: var(--border-2) solid hsl(var(--input));
+    background-color: hsl(var(--background));
+    cursor: pointer;
+    transition: all var(--transition-fast) var(--transition-ease);
+}
+
+.ui-checkbox {
+    border-radius: var(--rounded-sm);
+}
+
+.ui-radio {
+    border-radius: 50%;
+}
+
+.ui-checkbox:checked,
+.ui-radio:checked {
+    background-color: hsl(var(--primary));
+    border-color: hsl(var(--primary));
+}
+
+.ui-checkbox:focus,
+.ui-radio:focus {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--ring) / var(--opacity-50));
+}
+
+/* Toggle/Switch */
+.ui-toggle {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    width: 44px;
+    height: 24px;
+    background-color: hsl(var(--input));
+    border-radius: var(--rounded-full);
+    cursor: pointer;
+    transition: background-color var(--transition-base) var(--transition-ease);
+}
+
+.ui-toggle::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    width: 20px;
+    height: 20px;
+    background-color: white;
+    border-radius: 50%;
+    transition: transform var(--transition-base) var(--transition-ease);
+}
+
+.ui-toggle-checked {
+    background-color: hsl(var(--primary));
+}
+
+.ui-toggle-checked::after {
+    transform: translateX(20px);
+}
+
+/* Divider */
+.ui-divider {
+    border: none;
+    border-top: var(--border-1) solid hsl(var(--border));
+    margin: var(--space-4) 0;
+}
+
+/* Spinner */
+.ui-spinner {
+    width: 20px;
+    height: 20px;
+    border: 2px solid hsl(var(--muted));
+    border-right-color: hsl(var(--primary));
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+
+/* Alert */
+.ui-alert {
+    padding: var(--space-4);
+    border-radius: var(--radius);
+    border: var(--border-1) solid transparent;
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-3);
+}
+
+.ui-alert-info {
+    background-color: hsl(var(--info) / var(--opacity-10));
+    border-color: hsl(var(--info) / var(--opacity-30));
+    color: hsl(var(--info));
+}
+
+.ui-alert-success {
+    background-color: hsl(var(--success) / var(--opacity-10));
+    border-color: hsl(var(--success) / var(--opacity-30));
+    color: hsl(var(--success));
+}
+
+.ui-alert-warning {
+    background-color: hsl(var(--warning) / var(--opacity-10));
+    border-color: hsl(var(--warning) / var(--opacity-30));
+    color: hsl(var(--warning));
+}
+
+.ui-alert-destructive {
+    background-color: hsl(var(--destructive) / var(--opacity-10));
+    border-color: hsl(var(--destructive) / var(--opacity-30));
+    color: hsl(var(--destructive));
+}
+
+/* Skeleton Loader */
+.ui-skeleton {
+    background: linear-gradient(
+        90deg,
+        hsl(var(--muted)) 0%,
+        hsl(var(--muted) / 0.5) 50%,
+        hsl(var(--muted)) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.5s infinite;
+    border-radius: var(--radius);
+}
+
+@keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* Avatar */
+.ui-avatar {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background-color: hsl(var(--muted));
+    color: hsl(var(--muted-foreground));
+    font-weight: var(--font-medium);
+}
+
+.ui-avatar-xs { width: var(--space-6); height: var(--space-6); font-size: var(--text-xs); }
+.ui-avatar-sm { width: var(--space-8); height: var(--space-8); font-size: var(--text-sm); }
+.ui-avatar-md { width: var(--space-10); height: var(--space-10); font-size: var(--text-base); }
+.ui-avatar-lg { width: var(--space-12); height: var(--space-12); font-size: var(--text-lg); }
+.ui-avatar-xl { width: var(--space-16); height: var(--space-16); font-size: var(--text-xl); }
+
+.ui-avatar-rounded { border-radius: var(--radius); }
+.ui-avatar-circle { border-radius: 50%; }
+
+/* Utility Classes */
+.ui-shadow-sm { box-shadow: var(--shadow-sm); }
+.ui-shadow-md { box-shadow: var(--shadow-md); }
+.ui-shadow-lg { box-shadow: var(--shadow-lg); }
+.ui-shadow-xl { box-shadow: var(--shadow-xl); }
+
+.ui-transition { transition: all var(--transition-base) var(--transition-ease); }
+.ui-transition-fast { transition: all var(--transition-fast) var(--transition-ease); }
+.ui-transition-slow { transition: all var(--transition-slow) var(--transition-ease); }

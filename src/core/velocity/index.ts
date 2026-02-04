@@ -91,6 +91,7 @@ export {
 
     // Lazy loading
     lazy,
+    type JSX
 } from './jsx';
 
 export type { FC, Props } from './jsx';

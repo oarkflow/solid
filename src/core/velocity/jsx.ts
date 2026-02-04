@@ -181,10 +181,7 @@ export function reconcile(
     if (nextLen === 0) {
         for (let i = 0; i < prevLen; i++) {
             const n = prev[i];
-            if (n instanceof Element) {
-                const meta = elementRegistry.get(n);
-                if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(n); }
-            }
+            recursiveCleanup(n);
             n.parentNode?.removeChild(n);
         }
         return [];
@@ -238,26 +235,65 @@ export function reconcile(
             parent.insertBefore(node, currentBefore);
         }
 
-        result.unshift(node);
+        result.push(node);
         nextSet.add(node);
         currentBefore = node;
     }
 
     // Phase 2: Cleanup nodes that are no longer present
     for (const [key, node] of prevMap.entries()) {
-        if (node instanceof Element) {
-            const meta = elementRegistry.get(node);
-            if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(node); }
-        }
+        recursiveCleanup(node);
         node.parentNode?.removeChild(node);
     }
 
-    return result;
+    return result.reverse();
+}
+
+function recursiveCleanup(node: Node) {
+    // Call dispose if attached (for component roots)
+    if ((node as any)._dispose && typeof (node as any)._dispose === 'function') {
+        try {
+            (node as any)._dispose();
+        } catch (e) {
+            console.error('[Velocity] Error during component disposal:', e);
+        }
+        delete (node as any)._dispose;
+    }
+
+    if (node instanceof Element) {
+        const meta = elementRegistry.get(node);
+        if (meta) {
+            elementIdMap.delete(meta.id);
+            elementRegistry.delete(node);
+        }
+    }
+
+    // Recursively clean children (both Element and DocumentFragment can have children)
+    if (node instanceof Element || node instanceof DocumentFragment) {
+        let child = node.firstChild;
+        while (child) {
+            recursiveCleanup(child);
+            child = child.nextSibling;
+        }
+    }
 }
 
 // ============================================================================
 // Child Insertion
 // ============================================================================
+
+function normalizeNodes(value: any): Node[] {
+    if (value == null || value === false || value === true) return [];
+    if (Array.isArray(value)) {
+        return value.flat(Infinity).flatMap(normalizeNodes);
+    }
+    if (value instanceof DocumentFragment) {
+        return Array.from(value.childNodes).flatMap(normalizeNodes);
+    }
+    if (value instanceof Node) return [value];
+    if (typeof value === 'function') return [value]; // Keep functions for insertChild effects
+    return [document.createTextNode(String(value))];
+}
 
 function insertChild(parent: Node, child: any, before: Node | null = null): Node | null {
     if (child == null || child === false || child === true) {
@@ -271,16 +307,19 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
     }
 
     if (child instanceof Node) {
+        if (child instanceof DocumentFragment) {
+            const nodes = Array.from(child.childNodes);
+            parent.insertBefore(child, before);
+            return nodes[0] || null; // Simplified return
+        }
         parent.insertBefore(child, before);
         return child;
     }
 
     if (Array.isArray(child)) {
         const frag = document.createDocumentFragment();
-        const nodes: Node[] = [];
         for (const c of child.flat(Infinity)) {
-            const n = insertChild(frag, c);
-            if (n) nodes.push(n);
+            insertChild(frag, c);
         }
         parent.insertBefore(frag, before);
         return null;
@@ -297,12 +336,12 @@ function insertChild(parent: Node, child: any, before: Node | null = null): Node
 
         createEffect(() => {
             const value = child();
-            const nextValue = Array.isArray(value) ? value.flat(Infinity) : [value];
+            const nextValue = normalizeNodes(value);
             nodes = reconcile(parent, nodes, nextValue, endMarker);
 
             // Mark updated
             for (const n of nodes) {
-                if (n.nodeType === 1) markUpdated(n as Element);
+                if (n && n.nodeType === 1) markUpdated(n as Element);
             }
         });
 
@@ -353,7 +392,39 @@ export function createElement(
             }
         };
 
-        return createRoot(() => renderComponent());
+        let disposeFunc: (() => void) | undefined;
+        const result = createRoot((dispose) => {
+            disposeFunc = dispose;
+            return renderComponent();
+        });
+
+        // Attach dispose function to the result node(s)
+        if (result instanceof Node) {
+            if (result instanceof DocumentFragment) {
+                // If it's a fragment, we attach it to the first child or all children?
+                // Reconciler usually tracks by the nodes themselves.
+                // We'll attach it to a property on all top-level nodes of the fragment
+                // so no matter which one the reconciler sees, it can trigger cleanup.
+                const nodes = Array.from(result.childNodes);
+                for (const n of nodes) {
+                    (n as any)._dispose = disposeFunc;
+                }
+            } else {
+                (result as any)._dispose = disposeFunc;
+            }
+        }
+
+        // If a component returns a function, it's a reactive template.
+        // We wrap it in a 'display: contents' div to ensure it's treated as a stable Node
+        // by the reconciler, preventing stringification when used in arrays.
+        if (typeof result === 'function') {
+            return createElement('div', {
+                style: { display: 'contents' },
+                'data-velocity-component': name
+            }, result);
+        }
+
+        return result;
     }
 
     // Create element
@@ -479,10 +550,7 @@ export function For<T>(props: {
 
     onCleanup(() => {
         for (const entry of cache.values()) {
-            if (entry.node instanceof Element) {
-                const meta = elementRegistry.get(entry.node);
-                if (meta) { elementIdMap.delete(meta.id); elementRegistry.delete(entry.node); }
-            }
+            recursiveCleanup(entry.node);
         }
         cache.clear();
     });
@@ -609,7 +677,7 @@ export function lazy<T extends FC<any>>(
 
 export function Portal(props: {
     mount?: Element | string;
-    children?: JSX.Element;
+    children?: any;
 }): JSX.Element {
     const target = typeof props.mount === 'string'
         ? document.querySelector(props.mount)
@@ -622,9 +690,7 @@ export function Portal(props: {
     const container = document.createElement('div');
     container.style.display = 'contents';
 
-    if (props.children instanceof Node) {
-        container.appendChild(props.children);
-    }
+    insertChild(container, props.children);
 
     target.appendChild(container);
 
@@ -851,7 +917,7 @@ export function render(
 
 declare global {
     namespace JSX {
-        interface Element extends Node { }
+        interface Element extends Node { (props?: any): any; }
         interface IntrinsicElements {
             [elemName: string]: any;
         }

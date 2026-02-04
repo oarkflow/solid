@@ -335,10 +335,15 @@ export function createSignal<T>(
             }
         } else {
             globalEpoch++;
+            // Collect subscribers first to avoid issues with link recycling during re-track
+            const subs: Effect[] = [];
             let link = node.subs;
             while (link) {
-                runEffect(link.target);
+                subs.push(link.target);
                 link = link.nextSub;
+            }
+            for (let i = 0; i < subs.length; i++) {
+                runEffect(subs[i]);
             }
         }
     };
@@ -484,7 +489,12 @@ export function batch<T>(fn: () => T): T {
             batchDepth++;
             globalEpoch++;
             try {
+                let iterations = 0;
                 while (pendingEffects.size > 0) {
+                    if (iterations++ > 1000) {
+                        pendingEffects.clear();
+                        throw new Error('Maximum reactive batch iterations exceeded. Potential infinite loop detected.');
+                    }
                     const effects = Array.from(pendingEffects);
                     pendingEffects.clear();
                     for (const effect of effects) {
@@ -538,12 +548,12 @@ export function untrack<T>(fn: () => T): T {
  */
 export function onMount(fn: () => void | (() => void)): void {
     createEffect(() => {
-        queueMicrotask(() => {
+        setTimeout(() => {
             const cleanup = fn();
             if (typeof cleanup === 'function') {
                 onCleanup(cleanup);
             }
-        });
+        }, 0);
     });
 }
 
@@ -701,7 +711,7 @@ function createTransitionTuple(owner: Owner | null): TransitionTuple {
         if (typeof fn !== 'function') return;
         const targetOwner = owner ?? currentOwner;
         setPending(true);
-        queueMicrotask(() => {
+        setTimeout(() => {
             try {
                 runWithOwner(targetOwner ?? null, () => {
                     batch(() => {
@@ -717,7 +727,7 @@ function createTransitionTuple(owner: Owner | null): TransitionTuple {
             } finally {
                 setPending(false);
             }
-        });
+        }, 0);
     };
 
     return [pending, schedule];

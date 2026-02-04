@@ -53,6 +53,34 @@ export interface ThemeLetterSpacing {
     [key: string]: string;
 }
 
+export interface ThemeScreens {
+    [key: string]: string;
+}
+
+export interface ThemeAnimation {
+    [key: string]: string;
+}
+
+export interface ThemeKeyframes {
+    [key: string]: Record<string, Record<string, string>>;
+}
+
+export interface ThemeTransitionProperty {
+    [key: string]: string;
+}
+
+export interface ThemeTransitionTimingFunction {
+    [key: string]: string;
+}
+
+export interface ThemeTransitionDuration {
+    [key: string]: string;
+}
+
+export interface ThemeZIndex {
+    [key: string]: string;
+}
+
 export interface Theme {
     colors: ThemeColors;
     spacing: ThemeSpacing;
@@ -63,6 +91,13 @@ export interface Theme {
     maxWidth: ThemeMaxWidth;
     lineHeight: ThemeLineHeight;
     letterSpacing: ThemeLetterSpacing;
+    screens: ThemeScreens;
+    animation: ThemeAnimation;
+    keyframes: ThemeKeyframes;
+    transitionProperty: ThemeTransitionProperty;
+    transitionTimingFunction: ThemeTransitionTimingFunction;
+    transitionDuration: ThemeTransitionDuration;
+    zIndex: ThemeZIndex;
 }
 
 export interface ThemeExtend {
@@ -75,6 +110,13 @@ export interface ThemeExtend {
     maxWidth?: ThemeMaxWidth;
     lineHeight?: ThemeLineHeight;
     letterSpacing?: ThemeLetterSpacing;
+    screens?: ThemeScreens;
+    animation?: ThemeAnimation;
+    keyframes?: ThemeKeyframes;
+    transitionProperty?: ThemeTransitionProperty;
+    transitionTimingFunction?: ThemeTransitionTimingFunction;
+    transitionDuration?: ThemeTransitionDuration;
+    zIndex?: ThemeZIndex;
 }
 
 export interface TailwindConfig {
@@ -90,6 +132,13 @@ export interface TailwindConfig {
         maxWidth?: ThemeMaxWidth;
         lineHeight?: ThemeLineHeight;
         letterSpacing?: ThemeLetterSpacing;
+        screens?: ThemeScreens;
+        animation?: ThemeAnimation;
+        keyframes?: ThemeKeyframes;
+        transitionProperty?: ThemeTransitionProperty;
+        transitionTimingFunction?: ThemeTransitionTimingFunction;
+        transitionDuration?: ThemeTransitionDuration;
+        zIndex?: ThemeZIndex;
     };
 }
 
@@ -366,6 +415,85 @@ export const defaultLetterSpacing: ThemeLetterSpacing = {
     'widest': '0.1em'
 };
 
+// Default Screens
+export const defaultScreens: ThemeScreens = {
+    'sm': '640px',
+    'md': '768px',
+    'lg': '1024px',
+    'xl': '1280px',
+    '2xl': '1536px'
+};
+
+// Default Animations
+export const defaultAnimation: ThemeAnimation = {
+    'none': 'none',
+    'spin': 'spin 1s linear infinite',
+    'ping': 'ping 1s cubic-bezier(0, 0, 0.2, 1) infinite',
+    'pulse': 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+    'bounce': 'bounce 1s infinite'
+};
+
+// Default Keyframes
+export const defaultKeyframes: ThemeKeyframes = {
+    spin: {
+        to: { transform: 'rotate(360deg)' }
+    },
+    ping: {
+        '75%, 100%': { transform: 'scale(2)', opacity: '0' }
+    },
+    pulse: {
+        '50%': { opacity: '.5' }
+    },
+    bounce: {
+        '0%, 100%': { transform: 'translateY(-25%)', animationTimingFunction: 'cubic-bezier(0.8,0,1,1)' },
+        '50%': { transform: 'translateY(0)', animationTimingFunction: 'cubic-bezier(0,0,0.2,1)' }
+    }
+};
+
+// Default Transition Property
+export const defaultTransitionProperty: ThemeTransitionProperty = {
+    none: 'none',
+    all: 'all',
+    DEFAULT: 'color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter',
+    colors: 'color, background-color, border-color, text-decoration-color, fill, stroke',
+    opacity: 'opacity',
+    shadow: 'box-shadow',
+    transform: 'transform'
+};
+
+// Default Transition Timing Function
+export const defaultTransitionTimingFunction: ThemeTransitionTimingFunction = {
+    DEFAULT: 'cubic-bezier(0.4, 0, 0.2, 1)',
+    linear: 'linear',
+    in: 'cubic-bezier(0.4, 0, 1, 1)',
+    out: 'cubic-bezier(0, 0, 0.2, 1)',
+    'in-out': 'cubic-bezier(0.4, 0, 0.2, 1)'
+};
+
+// Default Transition Duration
+export const defaultTransitionDuration: ThemeTransitionDuration = {
+    DEFAULT: '150ms',
+    '75': '75ms',
+    '100': '100ms',
+    '150': '150ms',
+    '200': '200ms',
+    '300': '300ms',
+    '500': '500ms',
+    '700': '700ms',
+    '1000': '1000ms'
+};
+
+// Default Z-Index
+export const defaultZIndex: ThemeZIndex = {
+    'auto': 'auto',
+    '0': '0',
+    '10': '10',
+    '20': '20',
+    '30': '30',
+    '40': '40',
+    '50': '50'
+};
+
 // Complete Default Theme
 export const defaultTheme: Theme = {
     colors: defaultColors,
@@ -376,5 +504,12 @@ export const defaultTheme: Theme = {
     boxShadow: defaultBoxShadow,
     maxWidth: defaultMaxWidth,
     lineHeight: defaultLineHeight,
-    letterSpacing: defaultLetterSpacing
+    letterSpacing: defaultLetterSpacing,
+    screens: defaultScreens,
+    animation: defaultAnimation,
+    keyframes: defaultKeyframes,
+    transitionProperty: defaultTransitionProperty,
+    transitionTimingFunction: defaultTransitionTimingFunction,
+    transitionDuration: defaultTransitionDuration,
+    zIndex: defaultZIndex
 };
