@@ -213,7 +213,7 @@ export function ComponentShowcase() {
                                     />
                                     <Flex gap="md">
                                         <Checkbox label="Remember me" id="remember" />
-                                        <Radio label="Standard" name="plan" id="std" value="standard" checked />
+                                        <Radio label="Standard" name="plan" id="std" value="standard" defaultChecked />
                                         <Radio label="Premium" name="plan" id="prm" value="premium" />
                                     </Flex>
                                 </div>

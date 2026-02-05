@@ -1,3 +1,4 @@
+import { ChevronDown } from '@/core/icons';
 import type { BaseProps } from '../types';
 import { cn } from '../utils';
 import { signal } from '../jsx-runtime';
@@ -55,7 +56,7 @@ export function Accordion(props: AccordionProps) {
                             >
                                 <span>{item.title}</span>
                                 <span class={() => cn('transition-transform', isOpen() && 'rotate-180')}>
-                                    ▼
+                                    <ChevronDown size={18} />
                                 </span>
                             </button>
                             {() => isOpen() && (

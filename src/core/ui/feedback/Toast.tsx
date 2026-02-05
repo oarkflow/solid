@@ -1,3 +1,4 @@
+import { X } from '@/core/icons';
 import { signal, createEffect, onCleanup } from '../jsx-runtime';
 import type { BaseProps } from '../types';
 import { cn } from '../utils';
@@ -52,7 +53,7 @@ export function Toast(props: ToastProps) {
                     }}
                     aria-label="Close notification"
                 >
-                    ×
+                    <X size={16} />
                 </button>
             </div>
         )

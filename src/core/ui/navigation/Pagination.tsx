@@ -1,3 +1,4 @@
+import { ChevronDown, ChevronLeft, ChevronRight } from '@/core/icons';
 import { type BaseProps, type MaybeReactive } from '../types';
 import { cn } from '../utils';
 
@@ -38,8 +39,7 @@ export function Pagination(props: PaginationProps) {
                     'ui-base',
                     isCurrent ? 'ui-primary ui-mode-solid' : 'ui-secondary ui-mode-ghost',
                     'ui-size-sm-padding',
-                    'ui-size-sm-text',
-                    'min-w-[2.5rem]'
+                    'ui-size-sm-text'
                 )}
                 onClick={() => !isCurrent && props.onPageChange(page)}
                 disabled={isCurrent}
@@ -68,7 +68,7 @@ export function Pagination(props: PaginationProps) {
                         disabled={curr === 1}
                         aria-label="Previous page"
                     >
-                        ←
+                        <ChevronLeft size={16} />
                     </button>
                 )}
 
@@ -95,7 +95,7 @@ export function Pagination(props: PaginationProps) {
                         disabled={curr === total}
                         aria-label="Next page"
                     >
-                        →
+                        <ChevronRight size={16} />
                     </button>
                 )}
             </nav>
