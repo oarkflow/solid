@@ -25,6 +25,13 @@ export default defineConfig(({ command, mode, ssrBuild }) => ({
             "@": path.resolve(__dirname, "./src"),
         },
     },
+    server: {
+        proxy: {
+            '/chat': 'http://localhost:8080',
+            '/reset': 'http://localhost:8080',
+            '/config': 'http://localhost:8080'
+        }
+    },
   build: {
     minify: true,
     rollupOptions: {
