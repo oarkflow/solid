@@ -61,71 +61,109 @@ export type StorageListener<T> = (event: StorageEvent<T>) => void;
  * Encryption helpers
  * ========================= */
 
-async function encrypt(value: string, key: string): Promise<string> {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(value);
+const SALT_LEN = 16;
+const IV_LEN = 12;
 
-    // Derive key from password using PBKDF2
+function bufferToBase64(buffer: ArrayBuffer): string {
+    const bytes = new Uint8Array(buffer);
+    const len = bytes.byteLength;
+    const chunk = 8192; // Chunk size to avoid stack overflow
+    let binary = '';
+    for (let i = 0; i < len; i += chunk) {
+        binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+    }
+    return btoa(binary);
+}
+
+function base64ToBuffer(base64: string): Uint8Array {
+    const binary = atob(base64);
+    const len = binary.length;
+    const bytes = new Uint8Array(len);
+    for (let i = 0; i < len; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes;
+}
+
+async function deriveKey(rawKey: string, salt: Uint8Array): Promise<CryptoKey> {
+    const encoder = new TextEncoder();
     const keyMaterial = await crypto.subtle.importKey(
         'raw',
-        encoder.encode(key),
+        encoder.encode(rawKey),
         'PBKDF2',
         false,
         ['deriveKey']
     );
 
-    const cryptoKey = await crypto.subtle.deriveKey(
+    return crypto.subtle.deriveKey(
         {
             name: 'PBKDF2',
-            salt: encoder.encode('velocity-storage-salt'),
+            salt: salt as unknown as BufferSource,
             iterations: 100000,
             hash: 'SHA-256'
         },
         keyMaterial,
         { name: 'AES-GCM', length: 256 },
         false,
-        ['encrypt']
+        ['encrypt', 'decrypt']
     );
+}
 
-    const iv = crypto.getRandomValues(new Uint8Array(12));
+async function encrypt(value: string, key: string): Promise<string> {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(value);
+    const salt = crypto.getRandomValues(new Uint8Array(SALT_LEN));
+    const iv = crypto.getRandomValues(new Uint8Array(IV_LEN));
+
+    const cryptoKey = await deriveKey(key, salt);
+
     const ciphertext = await crypto.subtle.encrypt(
         { name: 'AES-GCM', iv },
         cryptoKey,
         data
     );
 
-    return btoa(String.fromCharCode(...new Uint8Array(iv.buffer)) + String.fromCharCode(...new Uint8Array(ciphertext)));
+    // Format: Salt + IV + Ciphertext
+    const combined = new Uint8Array(salt.length + iv.length + ciphertext.byteLength);
+    combined.set(salt, 0);
+    combined.set(iv, salt.length);
+    combined.set(new Uint8Array(ciphertext), salt.length + iv.length);
+
+    return bufferToBase64(combined.buffer);
 }
 
 async function decrypt(value: string, key: string): Promise<string> {
     try {
         const decoder = new TextDecoder();
-        const raw = new Uint8Array(atob(value).split('').map(c => c.charCodeAt(0)));
-        const iv = raw.slice(0, 12);
-        const ciphertext = raw.slice(12);
+        const raw = base64ToBuffer(value);
 
-        // Derive key from password using PBKDF2
-        const encoder = new TextEncoder();
-        const keyMaterial = await crypto.subtle.importKey(
-            'raw',
-            encoder.encode(key),
-            'PBKDF2',
-            false,
-            ['deriveKey']
-        );
+        // Try new format (Salt + IV + Cipher)
+        if (raw.length > SALT_LEN + IV_LEN) {
+            try {
+                const salt = raw.slice(0, SALT_LEN);
+                const iv = raw.slice(SALT_LEN, SALT_LEN + IV_LEN);
+                const ciphertext = raw.slice(SALT_LEN + IV_LEN);
 
-        const cryptoKey = await crypto.subtle.deriveKey(
-            {
-                name: 'PBKDF2',
-                salt: encoder.encode('velocity-storage-salt'),
-                iterations: 100000,
-                hash: 'SHA-256'
-            },
-            keyMaterial,
-            { name: 'AES-GCM', length: 256 },
-            false,
-            ['decrypt']
-        );
+                const cryptoKey = await deriveKey(key, salt);
+
+                const plaintext = await crypto.subtle.decrypt(
+                    { name: 'AES-GCM', iv },
+                    cryptoKey,
+                    ciphertext
+                );
+
+                return decoder.decode(plaintext);
+            } catch (e) {
+                // Decryption failed, might be legacy format
+            }
+        }
+
+        // Legacy format fallback (Fixed Salt + IV + Cipher)
+        const iv = raw.slice(0, IV_LEN);
+        const ciphertext = raw.slice(IV_LEN);
+        const fixedSalt = new TextEncoder().encode('velocity-storage-salt');
+
+        const cryptoKey = await deriveKey(key, fixedSalt);
 
         const plaintext = await crypto.subtle.decrypt(
             { name: 'AES-GCM', iv },
@@ -225,7 +263,7 @@ export function createStorage<T>(
     }
 
     const storage = getStorage();
-    let cachedValue: T | null = null;
+    let cachedValue: { value: T; expiresAt?: number } | null = null;
 
     function notify(type: StorageEvent<T>["type"], oldValue: T | null, newValue: T | null) {
         const listeners = storageListeners.get(key);
@@ -236,7 +274,14 @@ export function createStorage<T>(
     }
 
     async function load(): Promise<T> {
-        if (cache && cachedValue !== null) return cachedValue;
+        if (cache && cachedValue !== null) {
+            if (cachedValue.expiresAt && Date.now() > cachedValue.expiresAt) {
+                cachedValue = null;
+                storage.removeItem(key);
+                return defaultValue as T;
+            }
+            return cachedValue.value;
+        }
 
         const raw = storage.getItem(key);
         if (!raw) return defaultValue as T;
@@ -264,7 +309,12 @@ export function createStorage<T>(
                 return defaultValue as T;
             }
 
-            if (cache) cachedValue = value;
+            if (cache) {
+                cachedValue = {
+                    value,
+                    expiresAt: item.expiresAt
+                };
+            }
             return value;
         } catch (err) {
             console.error(`[storage:${key}] load failed`, err);
@@ -273,11 +323,14 @@ export function createStorage<T>(
     }
 
     async function save(value: T) {
+        const timestamp = Date.now();
+        const expiresAt = ttl ? timestamp + ttl : undefined;
+
         const item: StorageItem<T> = {
             value,
             version,
-            timestamp: Date.now(),
-            expiresAt: ttl ? Date.now() + ttl : undefined,
+            timestamp,
+            expiresAt,
             encrypted: useEncryption,
         };
 
@@ -287,7 +340,9 @@ export function createStorage<T>(
         }
 
         storage.setItem(key, serialized);
-        if (cache) cachedValue = value;
+        if (cache) {
+            cachedValue = { value, expiresAt };
+        }
     }
 
     return {
@@ -347,6 +402,10 @@ export function createStorage<T>(
 
         /** Check expiry */
         async isExpired() {
+            if (cache && cachedValue?.expiresAt) {
+                return Date.now() > cachedValue.expiresAt;
+            }
+
             const raw = storage.getItem(key);
             if (!raw) return false;
 

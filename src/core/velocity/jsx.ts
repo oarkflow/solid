@@ -1,25 +1,21 @@
-import { createEffect, onCleanup, untrack, getDevSnapshot, createRoot, createSignal, getOwner } from './reactivity';
+import { createEffect, onCleanup, untrack, getDevSnapshot, createRoot, createSignal, getOwner, setOwnerComponentId } from './reactivity';
+import { sanitizeHTML, sanitizeUrl } from './security';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type Props = Record<string, any> & { children?: any };
-export type FC<P = {}> = (props: P & Props) => JSX.Element;
+export type Props<P = {}> = P & {
+    children?: any;
+    class?: string;
+    className?: string;
+    style?: string | Partial<CSSStyleDeclaration> | Record<string, string>;
+    ref?: (el: Element) => void;
+    [key: string]: any;
+};
+export type FC<P = {}> = (props: Props<P>) => JSX.Element;
 
-// ============================================================================
-// Security
-// ============================================================================
 
-const DANGEROUS_PROTOCOLS = /^(javascript|data|vbscript):/i;
-
-function sanitizeUrl(url: string): string {
-    if (typeof url !== 'string') return '';
-    if (DANGEROUS_PROTOCOLS.test(url.trim().toLowerCase())) {
-        return 'about:blank';
-    }
-    return url;
-}
 
 // ============================================================================
 // DOM Helpers
@@ -165,7 +161,67 @@ function setAttr(el: Element, key: string, value: any, isSvg: boolean) {
 // ============================================================================
 
 /**
- * Optimized reconciliation algorithm for arrays of nodes
+ * Compute Longest Increasing Subsequence indices for minimal moves.
+ * Returns indices in `seq` that form the LIS.
+ */
+function computeLIS(seq: number[]): number[] {
+    const len = seq.length;
+    if (len === 0) return [];
+
+    // Patience sorting with back-pointers
+    const tails: number[] = [];  // Indices into seq
+    const prev: number[] = new Array(len).fill(-1);
+
+    for (let i = 0; i < len; i++) {
+        const val = seq[i];
+        if (val < 0) continue; // Skip removed items
+
+        // Binary search for insertion point
+        let lo = 0, hi = tails.length;
+        while (lo < hi) {
+            const mid = (lo + hi) >>> 1;
+            if (seq[tails[mid]] < val) lo = mid + 1;
+            else hi = mid;
+        }
+
+        if (lo > 0) prev[i] = tails[lo - 1];
+        tails[lo] = i;
+    }
+
+    // Reconstruct LIS
+    const result: number[] = [];
+    let idx = tails[tails.length - 1];
+    while (idx !== undefined && idx >= 0) {
+        result.push(idx);
+        idx = prev[idx];
+    }
+    return result.reverse();
+}
+
+/**
+ * Extract key from an item for reconciliation.
+ */
+function getKey(item: any): any {
+    if (item instanceof Node) return (item as any)._key ?? item;
+    if (item && typeof item === 'object') {
+        return item._key ?? item.id ?? item.key ?? item;
+    }
+    return item;
+}
+
+/**
+ * High-performance reconciliation algorithm for arrays of nodes.
+ *
+ * O(1) Fast Paths:
+ * 1. Empty → items (append all)
+ * 2. Items → empty (remove all)
+ * 3. Same length + same items (no-op)
+ * 4. Append only (new items at end)
+ * 5. Prepend only (new items at start)
+ * 6. Single item change
+ * 7. Single swap
+ *
+ * O(N) Fallback: LIS-based for minimal moves
  */
 export function reconcile(
     parent: Node,
@@ -173,80 +229,245 @@ export function reconcile(
     next: any[],
     before: Node | null = null
 ): Node[] {
-    const nextNodes: Node[] = [];
     const prevLen = prev.length;
     const nextLen = next.length;
 
-    // Fast path for empty lists
-    if (nextLen === 0) {
-        for (let i = 0; i < prevLen; i++) {
-            const n = prev[i];
-            recursiveCleanup(n);
-            n.parentNode?.removeChild(n);
+    try {
+        // ========================================
+        // Fast Path 1: Empty next → remove all
+        // ========================================
+        if (nextLen === 0) {
+            for (let i = 0; i < prevLen; i++) {
+                recursiveCleanup(prev[i]);
+                prev[i].parentNode?.removeChild(prev[i]);
+            }
+            return [];
         }
-        return [];
-    }
 
-    // Fast path for same content (reference equality)
-    if (prevLen === nextLen) {
-        let identical = true;
-        for (let i = 0; i < nextLen; i++) {
-            if (prev[i] !== next[i]) {
-                identical = false;
-                break;
+        // ========================================
+        // Fast Path 2: Empty prev → append all
+        // ========================================
+        if (prevLen === 0) {
+            const result: Node[] = [];
+            for (let i = 0; i < nextLen; i++) {
+                const item = next[i];
+                if (item == null || item === false || item === true) continue;
+
+                const node = item instanceof Node
+                    ? item
+                    : document.createTextNode(String(item));
+
+                parent.insertBefore(node, before);
+                result.push(node);
+            }
+            return result;
+        }
+
+        // ========================================
+        // Fast Path 3: Same arrays (reference equality)
+        // ========================================
+        if (prevLen === nextLen) {
+            let identical = true;
+            for (let i = 0; i < nextLen; i++) {
+                if (prev[i] !== next[i]) {
+                    identical = false;
+                    break;
+                }
+            }
+            if (identical) return prev;
+        }
+
+        // ========================================
+        // Fast Path 4: Append only (new items at end)
+        // ========================================
+        if (nextLen > prevLen) {
+            let isAppend = true;
+            for (let i = 0; i < prevLen; i++) {
+                if (getKey(prev[i]) !== getKey(next[i])) {
+                    isAppend = false;
+                    break;
+                }
+            }
+            if (isAppend) {
+                const result = [...prev];
+                for (let i = prevLen; i < nextLen; i++) {
+                    const item = next[i];
+                    if (item == null || item === false || item === true) continue;
+
+                    const node = item instanceof Node
+                        ? item
+                        : document.createTextNode(String(item));
+                    (node as any)._key = getKey(item);
+
+                    parent.insertBefore(node, before);
+                    result.push(node);
+                }
+                return result;
             }
         }
-        if (identical) return prev;
-    }
 
-    // Map-based reconciliation (Keyed)
-    const prevMap = new Map<any, Node>();
-    for (const p of prev) {
-        // Use a unique property if available, or the node itself
-        const key = (p as any)._key ?? p;
-        prevMap.set(key, p);
-    }
+        // ========================================
+        // Fast Path 5: Prepend only (new items at start)
+        // ========================================
+        if (nextLen > prevLen) {
+            const diff = nextLen - prevLen;
+            let isPrepend = true;
+            for (let i = 0; i < prevLen; i++) {
+                if (getKey(prev[i]) !== getKey(next[i + diff])) {
+                    isPrepend = false;
+                    break;
+                }
+            }
+            if (isPrepend) {
+                const result: Node[] = [];
+                const firstPrev = prev[0] || before;
+                for (let i = 0; i < diff; i++) {
+                    const item = next[i];
+                    if (item == null || item === false || item === true) continue;
 
-    const nextSet = new Set();
-    const result: Node[] = [];
+                    const node = item instanceof Node
+                        ? item
+                        : document.createTextNode(String(item));
+                    (node as any)._key = getKey(item);
 
-    let currentBefore = before;
-
-    // Phase 1: Create/Reuse nodes and place them in the correct order
-    // Note: This is an O(N) simplified reconciler. Robust ones do move optimization.
-    for (let i = nextLen - 1; i >= 0; i--) {
-        const item = next[i];
-        let node: Node;
-
-        const key = (item && typeof item === 'object') ? (item.id ?? item.key ?? item) : item;
-
-        if (prevMap.has(key)) {
-            node = prevMap.get(key)!;
-            prevMap.delete(key);
-        } else if (item instanceof Node) {
-            node = item;
-        } else if (item == null || item === false || item === true) {
-            continue;
-        } else {
-            node = document.createTextNode(String(item));
+                    parent.insertBefore(node, firstPrev);
+                    result.push(node);
+                }
+                return [...result, ...prev];
+            }
         }
 
-        if (node.nextSibling !== currentBefore || node.parentNode !== parent) {
-            parent.insertBefore(node, currentBefore);
+        // ========================================
+        // Fast Path 6: Single item removal
+        // ========================================
+        if (prevLen === nextLen + 1) {
+            let mismatch = -1;
+            for (let i = 0, j = 0; i < prevLen; i++) {
+                if (j < nextLen && getKey(prev[i]) === getKey(next[j])) {
+                    j++;
+                } else if (mismatch === -1) {
+                    mismatch = i;
+                } else {
+                    mismatch = -2; // Multiple mismatches
+                    break;
+                }
+            }
+            if (mismatch >= 0 && mismatch !== -2) {
+                recursiveCleanup(prev[mismatch]);
+                prev[mismatch].parentNode?.removeChild(prev[mismatch]);
+                return prev.filter((_, i) => i !== mismatch);
+            }
         }
 
-        result.push(node);
-        nextSet.add(node);
-        currentBefore = node;
-    }
+        // ========================================
+        // Fast Path 7: Single swap detection
+        // ========================================
+        if (prevLen === nextLen && prevLen >= 2) {
+            let swapI = -1, swapJ = -1;
+            for (let i = 0; i < prevLen; i++) {
+                if (getKey(prev[i]) !== getKey(next[i])) {
+                    if (swapI === -1) swapI = i;
+                    else if (swapJ === -1) swapJ = i;
+                    else { swapI = -2; break; } // More than 2 differences
+                }
+            }
+            if (swapI >= 0 && swapJ >= 0 &&
+                getKey(prev[swapI]) === getKey(next[swapJ]) &&
+                getKey(prev[swapJ]) === getKey(next[swapI])) {
+                // Swap nodes in DOM
+                const nodeI = prev[swapI];
+                const nodeJ = prev[swapJ];
+                const nextI = nodeI.nextSibling;
+                const nextJ = nodeJ.nextSibling;
 
-    // Phase 2: Cleanup nodes that are no longer present
-    for (const [key, node] of prevMap.entries()) {
-        recursiveCleanup(node);
-        node.parentNode?.removeChild(node);
-    }
+                if (nextI === nodeJ) {
+                    parent.insertBefore(nodeJ, nodeI);
+                } else if (nextJ === nodeI) {
+                    parent.insertBefore(nodeI, nodeJ);
+                } else {
+                    parent.insertBefore(nodeJ, nextI);
+                    parent.insertBefore(nodeI, nextJ);
+                }
 
-    return result.reverse();
+                const result = [...prev];
+                result[swapI] = nodeJ;
+                result[swapJ] = nodeI;
+                return result;
+            }
+        }
+
+        // ========================================
+        // Full Reconciliation with LIS
+        // ========================================
+
+        // Build prev key → (node, index) map
+        const prevMap = new Map<any, { node: Node; index: number }>();
+        for (let i = 0; i < prevLen; i++) {
+            const key = getKey(prev[i]);
+            prevMap.set(key, { node: prev[i], index: i });
+        }
+
+        // Build next nodes array and track which prev indices are used
+        const result: Node[] = new Array(nextLen);
+        const newIndices: number[] = new Array(nextLen).fill(-1);
+        const toAdd: { index: number; node: Node }[] = [];
+
+        for (let i = 0; i < nextLen; i++) {
+            const item = next[i];
+            if (item == null || item === false || item === true) {
+                result[i] = null as any; // Will be filtered
+                continue;
+            }
+
+            const key = getKey(item);
+            const entry = prevMap.get(key);
+
+            if (entry) {
+                result[i] = entry.node;
+                newIndices[i] = entry.index;
+                prevMap.delete(key);
+            } else {
+                const node = item instanceof Node
+                    ? item
+                    : document.createTextNode(String(item));
+                (node as any)._key = key;
+                result[i] = node;
+                toAdd.push({ index: i, node });
+            }
+        }
+
+        // Remove unused prev nodes
+        for (const { node } of prevMap.values()) {
+            recursiveCleanup(node);
+            node.parentNode?.removeChild(node);
+        }
+
+        // Compute LIS of newIndices for stable positions
+        const lis = computeLIS(newIndices);
+        const lisSet = new Set(lis);
+
+        // Move nodes not in LIS + insert new nodes
+        // Process backwards for correct insertion order
+        let nextSibling = before;
+        for (let i = nextLen - 1; i >= 0; i--) {
+            const node = result[i];
+            if (!node) continue;
+
+            const shouldMove = !lisSet.has(i) || toAdd.some(a => a.index === i);
+
+            if (shouldMove || node.nextSibling !== nextSibling || node.parentNode !== parent) {
+                parent.insertBefore(node, nextSibling);
+            }
+            nextSibling = node;
+        }
+
+        // Filter out nulls
+        return result.filter(Boolean);
+
+    } catch (e) {
+        console.error('[Velocity] Reconciliation error:', e);
+        return prev;
+    }
 }
 
 function recursiveCleanup(node: Node) {
@@ -375,8 +596,8 @@ export function createElement(
         // push instance, run component, and pop
         const renderComponent = () => {
             componentStack.push(instanceId);
-            const prev = (globalThis as any).__CURRENT_COMPONENT_ID;
-            (globalThis as any).__CURRENT_COMPONENT_ID = instanceId;
+            // Set componentId on owner (avoids globalThis pollution)
+            setOwnerComponentId(instanceId);
             try {
                 const liveName = (tag as any).displayName || (tag as any).name || meta.name;
                 if (liveName && meta.name !== liveName) {
@@ -388,7 +609,7 @@ export function createElement(
                 return res as JSX.Element;
             } finally {
                 componentStack.pop();
-                (globalThis as any).__CURRENT_COMPONENT_ID = prev;
+                // Clear componentId when exiting component (parent's will be used via owner chain)
             }
         };
 
@@ -576,8 +797,15 @@ export function For<T>(props: {
             return entry.node;
         });
 
+        // Cleanup removed items properly
         for (const key of cache.keys()) {
-            if (!nextKeys.has(key)) cache.delete(key);
+            if (!nextKeys.has(key)) {
+                const entry = cache.get(key);
+                if (entry && entry.node) {
+                    recursiveCleanup(entry.node as Node);
+                }
+                cache.delete(key);
+            }
         }
 
         return result;
@@ -700,32 +928,98 @@ export function Portal(props: {
 }
 
 // ============================================================================
-// Error Boundary
+// Error Boundary - Enhanced for Phase 4
 // ============================================================================
 
-export function ErrorBoundary(props: {
-    fallback: JSX.Element | ((error: Error, reset: () => void) => JSX.Element);
+export interface RetryConfig {
+    maxRetries?: number;         // Max automatic retries (default: 0)
+    retryDelay?: number;         // Delay between retries in ms (default: 1000)
+    exponentialBackoff?: boolean; // Double delay on each retry (default: false)
+}
+
+export interface ErrorInfo {
+    componentStack?: string;
+    retryCount: number;
+}
+
+export interface ErrorBoundaryProps {
+    fallback: JSX.Element | ((error: Error, retry: RetryInterface) => JSX.Element);
     children: JSX.Element;
-}): JSX.Element {
+    onError?: (error: Error, info: ErrorInfo) => void;
+    retryConfig?: RetryConfig;
+    resetKeys?: (() => any)[];   // Reset when any of these change
+}
+
+export interface RetryInterface {
+    reset: () => void;
+    retry: () => void;
+    retryCount: number;
+    isRetrying: boolean;
+}
+
+export function ErrorBoundary(props: ErrorBoundaryProps): JSX.Element {
     const [error, setError] = createSignal<Error | null>(null);
     const [key, setKey] = createSignal(0);
+    const [retryCount, setRetryCount] = createSignal(0);
+    const [isRetrying, setIsRetrying] = createSignal(false);
+
+    const config = props.retryConfig || {};
+    const maxRetries = config.maxRetries ?? 0;
+    const baseDelay = config.retryDelay ?? 1000;
+    const useBackoff = config.exponentialBackoff ?? false;
 
     const reset = () => {
         setError(null);
+        setRetryCount(0);
+        setIsRetrying(false);
         setKey(k => k + 1);
     };
 
-    // Create error handler within effect scope
-    createEffect(() => {
-        // Access key to re-run when reset is called
-        key();
-    });
+    const retry = () => {
+        const count = retryCount();
+        if (count < maxRetries) {
+            setIsRetrying(true);
+            const delay = useBackoff ? baseDelay * Math.pow(2, count) : baseDelay;
+
+            setTimeout(() => {
+                setRetryCount(c => c + 1);
+                setError(null);
+                setIsRetrying(false);
+                setKey(k => k + 1);
+            }, delay);
+        } else {
+            reset();
+        }
+    };
+
+    // Watch resetKeys for changes
+    if (props.resetKeys && props.resetKeys.length > 0) {
+        createEffect(() => {
+            // Track all resetKeys
+            for (const key of props.resetKeys!) {
+                key();
+            }
+            // Reset on any change (skip initial run)
+            if (error()) {
+                reset();
+            }
+        });
+    }
+
+    const retryInterface: RetryInterface = {
+        reset,
+        retry,
+        get retryCount() { return retryCount(); },
+        get isRetrying() { return isRetrying(); }
+    };
 
     return (() => {
+        key(); // Track key for re-renders
         const err = error();
+
         if (err) {
             if (typeof props.fallback === 'function') {
-                return (props.fallback as (error: Error, reset: () => void) => JSX.Element)(err, reset);
+                return (props.fallback as (error: Error, retry: RetryInterface) => JSX.Element)(err, retryInterface);
             }
             return props.fallback;
         }
@@ -735,8 +1029,19 @@ export function ErrorBoundary(props: {
         } catch (e) {
             const normalizedError = e instanceof Error ? e : new Error(String(e));
             setError(normalizedError);
+
+            // Notify via callback
+            props.onError?.(normalizedError, {
+                retryCount: retryCount(),
+            });
+
+            // Auto-retry if configured
+            if (retryCount() < maxRetries) {
+                retry();
+            }
+
             if (typeof props.fallback === 'function') {
-                return (props.fallback as (error: Error, reset: () => void) => JSX.Element)(normalizedError, reset);
+                return (props.fallback as (error: Error, retry: RetryInterface) => JSX.Element)(normalizedError, retryInterface);
             }
             return props.fallback;
         }
@@ -744,23 +1049,56 @@ export function ErrorBoundary(props: {
 }
 
 // ============================================================================
-// Suspense Boundary
+// Suspense Boundary - Enhanced for Phase 4
 // ============================================================================
 
-export function Suspense(props: {
+export interface SuspenseProps {
     fallback: JSX.Element;
     children: JSX.Element;
-}): JSX.Element {
+    onPending?: () => void;      // Called when entering pending state
+    onResolve?: () => void;      // Called when resolved
+    timeout?: number;            // Delay before showing fallback (ms)
+    maxDuration?: number;        // Max time to wait before showing fallback (ms)
+}
+
+export function Suspense(props: SuspenseProps): JSX.Element {
     const [pending, setPending] = createSignal(false);
+    const [showFallback, setShowFallback] = createSignal(false);
     const [error, setError] = createSignal<Error | null>(null);
 
-    // Track pending async operations
     let pendingCount = 0;
+    let timeoutId: any = null;
+    let maxDurationId: any = null;
+    let pendingStartTime = 0;
 
     const suspenseContext = {
         begin: () => {
             pendingCount++;
-            setPending(true);
+            if (pendingCount === 1) {
+                pendingStartTime = Date.now();
+                setPending(true);
+                props.onPending?.();
+
+                // Handle timeout delay for showing fallback
+                if (props.timeout && props.timeout > 0) {
+                    timeoutId = setTimeout(() => {
+                        if (pendingCount > 0) {
+                            setShowFallback(true);
+                        }
+                    }, props.timeout);
+                } else {
+                    setShowFallback(true);
+                }
+
+                // Handle max duration
+                if (props.maxDuration) {
+                    maxDurationId = setTimeout(() => {
+                        if (pendingCount > 0) {
+                            setShowFallback(true);
+                        }
+                    }, props.maxDuration);
+                }
+            }
         },
         end: (err?: Error | null) => {
             pendingCount--;
@@ -768,12 +1106,30 @@ export function Suspense(props: {
             if (pendingCount <= 0) {
                 pendingCount = 0;
                 setPending(false);
+                setShowFallback(false);
+
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = null;
+                }
+                if (maxDurationId) {
+                    clearTimeout(maxDurationId);
+                    maxDurationId = null;
+                }
+
+                if (!err) {
+                    props.onResolve?.();
+                }
             }
         }
     };
 
+    onCleanup(() => {
+        if (timeoutId) clearTimeout(timeoutId);
+        if (maxDurationId) clearTimeout(maxDurationId);
+    });
+
     return createRoot((dispose) => {
-        // Inject suspense context for children
         const owner = getOwner() as any;
         if (owner) {
             owner.suspense = suspenseContext;
@@ -789,7 +1145,8 @@ export function Suspense(props: {
                 }, `Error: ${err.message}`);
             }
 
-            if (pending()) {
+            // Only show fallback if pending AND (no timeout OR showFallback is true)
+            if (pending() && showFallback()) {
                 return props.fallback;
             }
 
@@ -802,38 +1159,7 @@ export function Suspense(props: {
 // Safe HTML Rendering
 // ============================================================================
 
-const DANGEROUS_TAGS_SET = new Set(['script', 'iframe', 'object', 'embed', 'form', 'input', 'button', 'textarea', 'select', 'style', 'link', 'meta', 'base']);
-const DANGEROUS_ATTRS_SET = new Set(['formaction', 'xlink:href']);
 
-function inlineSanitizeHTML(html: string): string {
-    if (!html || typeof DOMParser === 'undefined') return '';
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-
-    function clean(node: Node) {
-        if (node.nodeType === 1) {
-            const el = node as Element;
-            const tag = el.tagName.toLowerCase();
-            if (DANGEROUS_TAGS_SET.has(tag)) {
-                el.remove();
-                return;
-            }
-            const attrs = el.attributes;
-            for (let i = attrs.length - 1; i >= 0; i--) {
-                const attr = attrs[i];
-                const name = attr.name.toLowerCase();
-                const val = attr.value.toLowerCase();
-                if (name.startsWith('on') || DANGEROUS_ATTRS_SET.has(name) || val.includes('javascript:')) {
-                    el.removeAttribute(attr.name);
-                }
-            }
-        }
-        node.childNodes.forEach(clean);
-    }
-
-    clean(doc.body);
-    return doc.body.innerHTML;
-}
 
 /**
  * Render HTML string safely with optional sanitization
@@ -870,15 +1196,17 @@ export function Html(props: {
         }
     }
 
+    const setHtml = (html: string) => {
+        el.innerHTML = shouldSanitize ? sanitizeHTML(html) : html;
+    };
+
     // Initial render
-    const rawHtml = getHtml();
-    el.innerHTML = shouldSanitize ? inlineSanitizeHTML(rawHtml) : rawHtml;
+    setHtml(getHtml());
 
     // Reactive updates if html is a function
     if (typeof props.html === 'function') {
         createEffect(() => {
-            const html = getHtml();
-            el.innerHTML = shouldSanitize ? inlineSanitizeHTML(html) : html;
+            setHtml(getHtml());
         });
     }
 
@@ -919,7 +1247,7 @@ declare global {
     namespace JSX {
         interface Element extends Node { (props?: any): any; }
         interface IntrinsicElements {
-            [elemName: string]: any;
+            [elemName: string]: Props<any>;
         }
         interface ElementAttributesProperty {
             props: {};

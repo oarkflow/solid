@@ -2,8 +2,8 @@
  * @vitest-environment jsdom
  */
 import { describe, it, expect, beforeEach } from 'vitest';
-import { render } from '@/core/velocity';
-import { LoginPage } from '@/app/pages/Login';
+import { render } from '../../../core/velocity';
+import { LoginPage } from '../../../app/pages/Login';
 import { installTailwind } from '../index';
 
 describe('Login page render', () => {
@@ -16,7 +16,7 @@ describe('Login page render', () => {
 
     it('renders and injects style rules for classes', async () => {
         installTailwind();        // Register a mock router API to avoid routing errors in LoginPage
-        const { registerRouterApi } = await import('@/app/router/navigation');
+        const { registerRouterApi } = await import('../../../app/router/navigation');
         registerRouterApi({ navigate: () => { } } as any);        // render accepts component function too
         render(() => LoginPage({}), document.getElementById('root')!);
 

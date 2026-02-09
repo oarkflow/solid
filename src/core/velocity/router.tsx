@@ -9,17 +9,17 @@ import type { FC, Props } from './jsx';
 let globalLink: any = null;
 let globalUseRouter: any = null;
 
-export function _setGlobalRouter(Link: any, useRouter: any) {
+export function _setGlobalRouter(Link: FC<any>, useRouter: () => RouterApi) {
     globalLink = Link;
     globalUseRouter = useRouter;
 }
 
-export const Link: any = (props: any) => {
+export const Link: FC<Props & { to: string; activeClass?: string; exactActiveClass?: string }> = (props) => {
     if (!globalLink) throw new Error('Router not initialized. Call createRouter first.');
     return globalLink(props);
 };
 
-export const useRouter = (): any => {
+export const useRouter = (): RouterApi => {
     if (!globalUseRouter) throw new Error('Router not initialized. Call createRouter first.');
     return globalUseRouter();
 };
@@ -130,9 +130,9 @@ function createRadixNode(): RadixNode {
     return { children: new Map() };
 }
 
-const rootNode = createRadixNode();
 
-function insertRoute(route: CompiledRoute, parentStack: CompiledRoute[] = []) {
+function insertRoute(rootNode: RadixNode, route: CompiledRoute, parentStack: CompiledRoute[] = []) {
+    // console.log('Insert:', route.path, 'Stack:', parentStack.map(r => r.path));
     let current = rootNode;
     const stack = [...parentStack, route];
     const parts = route.path.split('/').filter(p => p !== '');
@@ -173,12 +173,13 @@ function insertRoute(route: CompiledRoute, parentStack: CompiledRoute[] = []) {
 
     if (route.children) {
         for (const child of route.children) {
-            insertRoute(child, stack);
+            insertRoute(rootNode, child, stack);
         }
     }
 }
 
-function findMatch(path: string): { stack: CompiledRoute[]; params: Record<string, string> } | null {
+function findMatch(rootNode: RadixNode, path: string): { stack: CompiledRoute[]; params: Record<string, string> } | null {
+    // console.log('FindMatch:', path);
     const parts = path.split('/').filter(p => p !== '');
     const params: Record<string, string> = {};
 
@@ -197,6 +198,7 @@ function findMatch(path: string): { stack: CompiledRoute[]; params: Record<strin
         if (paramNode) {
             const res = search(paramNode, index + 1);
             if (res) {
+                // console.log('Found param:', paramNode.param, '=', part);
                 params[paramNode.param!] = decodeURIComponent(part);
                 return res;
             }
@@ -212,6 +214,7 @@ function findMatch(path: string): { stack: CompiledRoute[]; params: Record<strin
     }
 
     const stack = search(rootNode, 0);
+    // console.log('Result:', stack ? 'Match' : 'No match', 'Params:', params);
     return stack ? { stack, params } : null;
 }
 
@@ -307,6 +310,7 @@ function compileRoute(route: Route, basePath: string): CompiledRoute {
 
     return {
         ...rest,
+        path: normalized,
         regex: new RegExp(`^${pattern}\/?$`),
         prefixRegex: new RegExp(`^${pattern}(?:\/.*)?$`),
         keys,
@@ -426,10 +430,14 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
     }
 
     const compiled = compileRoutes(routes);
+
+    // Route match cache with size limit to prevent unbounded growth
+    const MAX_CACHE_SIZE = 100;
     const matchCache = new Map<string, { stack: CompiledRoute[]; params: Record<string, string>; score: number } | null>();
 
-    // Populate Radix Trie
-    compiled.forEach(r => insertRoute(r));
+    // Create instance-specific Radix Trie (not shared across router instances)
+    const rootNode = createRadixNode();
+    compiled.forEach(r => insertRoute(rootNode, r));
 
     const headManager = createHeadManager(options?.head);
     const globalMiddlewares = options?.middlewares ?? [];
@@ -550,13 +558,18 @@ export function createRouter(routes: Route[], options?: RouterOptions) {
         let matched = matchCache.get(cacheKey);
 
         if (!matched) {
-            const res = findMatch(currentPath);
+            const res = findMatch(rootNode, currentPath);
             if (res) {
                 matched = {
                     stack: res.stack,
                     params: res.params,
                     score: 0 // Score not needed for trie but kept for type compatibility
                 };
+            }
+            // Evict oldest entry if cache is full
+            if (matchCache.size >= MAX_CACHE_SIZE) {
+                const firstKey = matchCache.keys().next().value;
+                if (firstKey !== undefined) matchCache.delete(firstKey);
             }
             matchCache.set(cacheKey, matched || null);
         }

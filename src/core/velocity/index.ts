@@ -42,8 +42,18 @@ export {
     createDebouncedSignal,
     createThrottledSignal,
 
+    //Signal Boosting (Phase 3)
+    createStaticSignal,
+    boostSignal,
+
     // Async resources
     createResource,
+    createStreamingResource,
+
+    // Phase 6: Priority constants
+    PRIORITY_CRITICAL,
+    PRIORITY_NORMAL,
+    PRIORITY_IDLE,
 
     // Context API
     createContext,
@@ -56,6 +66,8 @@ export {
     // Component deps
     getComponentDeps,
 } from './reactivity';
+
+export type { Resource, ResourceState, ResourceOptions } from './reactivity';
 
 // ============================================================================
 // JSX Runtime
@@ -97,22 +109,39 @@ export {
 export type { FC, Props } from './jsx';
 
 // ============================================================================
+// Fast-DOM (High-Performance Templates) - Phase 3
+// ============================================================================
+
+export {
+    // Template system
+    createTemplate,
+    hydrate,
+    html,
+    el,
+    createElementFast,
+
+    // Template management
+    registerTemplate,
+    instantiateTemplate,
+    clearTemplateCache,
+    getTemplateCacheStats,
+} from './fast-dom';
+
+export type {
+    SlotDescriptor,
+    TemplateDescriptor,
+    Binding,
+} from './fast-dom';
+
+// ============================================================================
 // State Management
 // ============================================================================
 
 export {
     createStore,
-    createActions,
-    createDerivedStore,
-    createLogger,
-    createUndoRedo,
-} from './store';
-
-export type {
-    StoreApi,
-    StoreOptions,
-    StoreMiddleware,
-    ActionContext,
+    unwrap,
+    produce,
+    reconcile,
 } from './store';
 
 // ============================================================================
@@ -120,7 +149,18 @@ export type {
 // ============================================================================
 
 export { createRouter, Link, useRouter } from './router';
+
+// ============================================================================
+// Server-Side Rendering (SSR)
+// ============================================================================
+
+export {
+    renderToString,
+    renderToStream,
+} from './ssr';
+
 export type {
+
     Route,
     RouterApi,
     Middleware,

@@ -175,29 +175,37 @@ function sanitizeWithRegex(html: string, allowTags: string[], maxLength?: number
     let result = html;
 
     dangerousTags.forEach(tag => {
-        const regex = new RegExp(`<${tag}[^>]*>.*?</${tag}>`, 'gis');
+        // Match opening tag, content, and closing tag (non-greedy)
+        const regex = new RegExp(`<${tag}\\b[^>]*>.*?</${tag}>`, 'gis');
         result = result.replace(regex, '');
-        // Also remove self-closing
-        result = result.replace(new RegExp(`<${tag}[^>]*/?>`, 'gi'), '');
+        // Also remove self-closing or empty tags
+        result = result.replace(new RegExp(`<${tag}\\b[^>]*/?>`, 'gi'), '');
     });
 
     // Remove dangerous attributes
     DANGEROUS_ATTRS.forEach(attr => {
-        result = result.replace(new RegExp(`\\s*${attr}\\s*=\\s*["'][^"']*["']`, 'gi'), '');
-        result = result.replace(new RegExp(`\\s*${attr}\\s*=\\s*[^\\s>]+`, 'gi'), '');
+        // Remove attribute with quoted value
+        result = result.replace(new RegExp(`\\s+${attr}\\s*=\\s*["'][^"']*["']`, 'gi'), '');
+        // Remove attribute with unquoted value
+        result = result.replace(new RegExp(`\\s+${attr}\\s*=\\s*[^\\s>]+`, 'gi'), '');
+        // Remove boolean attribute (just the name)
+        result = result.replace(new RegExp(`\\s+${attr}\\b`, 'gi'), '');
     });
 
-    // Remove javascript: URLs
-    result = result.replace(/\s*(href|src|action|poster|background)\s*=\s*["']?\s*javascript:[^"'\s>]*/gi, '');
+    // Sanitize style attributes (dangerous in SSR/RegEx)
+    // Remove styles containing 'javascript:', 'expression', or 'url' (potential XSS)
+    result = result.replace(/\s+style\s*=\s*["'][^"']*(javascript:|expression|url\()[^"']*["']/gi, '');
+    result = result.replace(/\s+style\s*=\s*[^"'\s>]*((javascript:|expression|url\())[^"'\s>]*/gi, '');
 
-    // Remove data: URLs except for images if configured
-    result = result.replace(/\s*(href|src|action|poster|background)\s*=\s*["']?\s*data:[^"'\s>]+/gi, (match) => {
-        return match.toLowerCase().includes('data:image/') ? match : '';
-    });
+    // Remove javascript: URLs (with improved whitespace/entity handling options)
+    // Note: Regex can't perfectly handle HTML entities, so we're aggressive here
+    result = result.replace(/\s+(href|src|action|poster|background)\s*=\s*["']?\s*(javascript|vbscript|data):[^"'\s>]*["']?/gi, '');
 
-    // Remove event handlers and script content
+    // Remove script content that might have been missed
     result = result.replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '');
-    result = result.replace(/on\w+\s*=\s*["'][^"']*["']/gi, '');
+
+    // Clean up event handlers aggressively
+    result = result.replace(/\s+on[a-z]+\s*=\s*["'][^"']*["']/gi, '');
 
     return maxLength ? result.slice(0, maxLength) : result;
 }

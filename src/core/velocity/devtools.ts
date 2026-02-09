@@ -923,3 +923,309 @@ function ensureLauncher() {
         launcher.style.display = 'none';
     }
 }
+
+// ============================================================================
+// Performance Profiling - Phase 4 Enhancement
+// ============================================================================
+
+export interface ProfileEntry {
+    type: 'signal-read' | 'signal-write' | 'effect-run' | 'computation' | 'reconcile' | 'render';
+    name: string;
+    startTime: number;
+    duration: number;
+    depth: number;
+    metadata?: Record<string, any>;
+}
+
+export interface ProfileSession {
+    startTime: number;
+    endTime?: number;
+    entries: ProfileEntry[];
+    metrics: ProfileMetrics;
+}
+
+export interface ProfileMetrics {
+    signalReads: number;
+    signalWrites: number;
+    effectRuns: number;
+    computations: number;
+    reconciliations: number;
+    renders: number;
+    totalDuration: number;
+    avgUpdateTime: number;
+    peakUpdateTime: number;
+}
+
+let currentSession: ProfileSession | null = null;
+let profilerStack: { type: string; startTime: number; name: string }[] = [];
+let updateTimes: number[] = [];
+
+/**
+ * Start a new profiling session
+ */
+export function startProfiler(): void {
+    currentSession = {
+        startTime: performance.now(),
+        entries: [],
+        metrics: {
+            signalReads: 0,
+            signalWrites: 0,
+            effectRuns: 0,
+            computations: 0,
+            reconciliations: 0,
+            renders: 0,
+            totalDuration: 0,
+            avgUpdateTime: 0,
+            peakUpdateTime: 0
+        }
+    };
+    profilerStack = [];
+    updateTimes = [];
+    console.log('[Velocity Profiler] Session started');
+}
+
+/**
+ * Stop profiling and return session data
+ */
+export function stopProfiler(): ProfileSession | null {
+    if (!currentSession) return null;
+
+    currentSession.endTime = performance.now();
+    currentSession.metrics.totalDuration = currentSession.endTime - currentSession.startTime;
+
+    if (updateTimes.length > 0) {
+        currentSession.metrics.avgUpdateTime = updateTimes.reduce((a, b) => a + b, 0) / updateTimes.length;
+        currentSession.metrics.peakUpdateTime = Math.max(...updateTimes);
+    }
+
+    const session = currentSession;
+    currentSession = null;
+
+    console.log('[Velocity Profiler] Session ended', {
+        duration: `${session.metrics.totalDuration.toFixed(2)}ms`,
+        entries: session.entries.length,
+        metrics: session.metrics
+    });
+
+    return session;
+}
+
+/**
+ * Record a profiling entry
+ */
+export function profileMark(type: ProfileEntry['type'], name: string, startTime?: number): () => void {
+    if (!currentSession) return () => { };
+
+    const start = startTime ?? performance.now();
+    const depth = profilerStack.length;
+    profilerStack.push({ type, startTime: start, name });
+
+    return () => {
+        const end = performance.now();
+        const duration = end - start;
+        profilerStack.pop();
+
+        const entry: ProfileEntry = {
+            type,
+            name,
+            startTime: start - currentSession!.startTime,
+            duration,
+            depth
+        };
+
+        currentSession!.entries.push(entry);
+
+        // Update metrics
+        switch (type) {
+            case 'signal-read':
+                currentSession!.metrics.signalReads++;
+                break;
+            case 'signal-write':
+                currentSession!.metrics.signalWrites++;
+                updateTimes.push(duration);
+                break;
+            case 'effect-run':
+                currentSession!.metrics.effectRuns++;
+                break;
+            case 'computation':
+                currentSession!.metrics.computations++;
+                break;
+            case 'reconcile':
+                currentSession!.metrics.reconciliations++;
+                updateTimes.push(duration);
+                break;
+            case 'render':
+                currentSession!.metrics.renders++;
+                break;
+        }
+    };
+}
+
+/**
+ * Get current profiling session (for live monitoring)
+ */
+export function getProfilerSession(): ProfileSession | null {
+    return currentSession;
+}
+
+/**
+ * Generate flame graph data from profile entries
+ */
+export function generateFlameGraph(session: ProfileSession): FlameGraphNode {
+    const root: FlameGraphNode = {
+        name: 'root',
+        value: session.metrics.totalDuration,
+        children: []
+    };
+
+    // Group entries by depth and time
+    const depthMap = new Map<number, ProfileEntry[]>();
+    for (const entry of session.entries) {
+        const arr = depthMap.get(entry.depth) || [];
+        arr.push(entry);
+        depthMap.set(entry.depth, arr);
+    }
+
+    // Build tree from entries
+    for (const entry of session.entries.filter(e => e.depth === 0)) {
+        const node = buildFlameNode(entry, session.entries);
+        root.children.push(node);
+    }
+
+    return root;
+}
+
+export interface FlameGraphNode {
+    name: string;
+    value: number;
+    children: FlameGraphNode[];
+}
+
+function buildFlameNode(entry: ProfileEntry, allEntries: ProfileEntry[]): FlameGraphNode {
+    const endTime = entry.startTime + entry.duration;
+    const children: FlameGraphNode[] = [];
+
+    // Find direct children (entries at depth+1 that started during this entry)
+    for (const other of allEntries) {
+        if (other.depth === entry.depth + 1 &&
+            other.startTime >= entry.startTime &&
+            other.startTime + other.duration <= endTime) {
+            children.push(buildFlameNode(other, allEntries));
+        }
+    }
+
+    return {
+        name: `${entry.type}: ${entry.name}`,
+        value: entry.duration,
+        children
+    };
+}
+
+// ============================================================================
+// Performance Timeline Export
+// ============================================================================
+
+/**
+ * Export profile session as JSON for external analysis
+ */
+export function exportProfile(session: ProfileSession): string {
+    return JSON.stringify({
+        ...session,
+        exported: new Date().toISOString(),
+        version: '1.0.0'
+    }, null, 2);
+}
+
+/**
+ * Export profile as Chrome DevTools Performance format
+ */
+export function exportAsChromeTrace(session: ProfileSession): string {
+    const events: any[] = [];
+    const pid = 1;
+    const tid = 1;
+
+    for (const entry of session.entries) {
+        // Duration event (X)
+        events.push({
+            name: entry.name,
+            cat: entry.type,
+            ph: 'X',
+            ts: (session.startTime + entry.startTime) * 1000, // Chrome uses microseconds
+            dur: entry.duration * 1000,
+            pid,
+            tid,
+            args: entry.metadata || {}
+        });
+    }
+
+    return JSON.stringify({
+        traceEvents: events,
+        displayTimeUnit: 'ms',
+        systemTraceEvents: 'SystemTraceData',
+        otherData: {
+            version: 'Velocity Profiler v1.0'
+        }
+    });
+}
+
+// ============================================================================
+// Reactive Update Tracking
+// ============================================================================
+
+let updateHistory: { timestamp: number; count: number; duration: number }[] = [];
+const MAX_HISTORY = 100;
+
+/**
+ * Track a reactive update for timeline visualization
+ */
+export function trackUpdate(duration: number): void {
+    const now = Date.now();
+    updateHistory.push({ timestamp: now, count: 1, duration });
+
+    if (updateHistory.length > MAX_HISTORY) {
+        updateHistory.shift();
+    }
+}
+
+/**
+ * Get recent update history for timeline display
+ */
+export function getUpdateHistory(since?: number): typeof updateHistory {
+    if (since) {
+        return updateHistory.filter(u => u.timestamp >= since);
+    }
+    return [...updateHistory];
+}
+
+/**
+ * Calculate updates per second over the history window
+ */
+export function getUpdatesPerSecond(): number {
+    if (updateHistory.length < 2) return 0;
+
+    const first = updateHistory[0].timestamp;
+    const last = updateHistory[updateHistory.length - 1].timestamp;
+    const windowMs = last - first;
+
+    if (windowMs === 0) return 0;
+
+    return (updateHistory.length / windowMs) * 1000;
+}
+
+/**
+ * Get performance summary for DevTools display
+ */
+export function getPerformanceSummary(): {
+    updatesPerSecond: number;
+    avgUpdateTime: number;
+    peakUpdateTime: number;
+    totalUpdates: number;
+} {
+    const times = updateHistory.map(u => u.duration);
+    return {
+        updatesPerSecond: getUpdatesPerSecond(),
+        avgUpdateTime: times.length > 0 ? times.reduce((a, b) => a + b, 0) / times.length : 0,
+        peakUpdateTime: times.length > 0 ? Math.max(...times) : 0,
+        totalUpdates: updateHistory.length
+    };
+}

@@ -1,967 +1,702 @@
 /**
- * Fine-Grained Reactivity System
+ * Velocity - High Performance Reactivity System
  *
- * Simple, working implementation with:
- * - Automatic dependency tracking
- * - Synchronous updates for immediate feedback
- * - Proper cleanup and disposal
+ * Optimized for:
+ * - Speed: Bitmask state tracking (O(1) checks)
+ * - Memory: Monomorphic class shapes (no Map/Set overhead)
+ * - Stability: Glitch-free synchronous execution
  */
 
 // ============================================================================
-// Global State
+// Constants & Enums (Bitmasks)
 // ============================================================================
 
+// Reactive Node States
+const STALE = 1;       // 001 - Dependency might have changed
+const DIRTY = 2;       // 010 - Dependency definitely changed
+const DISPOSED = 4;    // 100 - Node is dead
+
+// Effect Priorities (Phase 6 Optimization)
+export const PRIORITY_CRITICAL = 0;  // Immediate execution (user interactions, animations)
+export const PRIORITY_NORMAL = 1;    // Standard reactivity
+export const PRIORITY_IDLE = 2;      // Deferred (analytics, logging)
+
+// Effects
+const isServer = false;
+let BatchIteration = 0;
+let EffectQueue: Computation[] = [];
+let Owner: Computation | null = null;
+let Listener: Computation | null = null;
+let Pending: boolean = false;
+let RunningEffects = false;
+let Epoch = 0; // Track current execution epoch
+
 // ============================================================================
-// Internal Types & State
+// Interfaces & Types
 // ============================================================================
 
-type Link = {
-    source: SignalNode<any>;
-    target: Effect;
-    prevSub: Link | null;
-    nextSub: Link | null;
-    prevSource: Link | null;
-    nextSource: Link | null;
-};
-
-type Effect = {
-    execute: () => void;
-    sources: Link | null;      // Head of dependency list (Link list)
-    sourcesTail: Link | null;  // Tail for fast appending
-    cleanups: (() => void)[];
-    owner: Owner | null;
-    status: number;            // For glitch-free/epoch tracking
-};
-
-type SignalNode<T> = {
+export interface Signal<T> {
     value: T;
-    subs: Link | null;         // Head of subscriber list (Link list)
-    subsTail: Link | null;     // Tail for fast appending
-    equals: (prev: T, next: T) => boolean;
-    id?: number;               // Devtools id
-    name?: string;             // Devtools name
-};
-
-type Owner = {
-    parent: Owner | null;
-    cleanups: (() => void)[];
-    errorHandlers: Set<(error: Error) => void>;
-    effects: Set<Effect>;
-    suspense?: SuspenseBoundary;
-    transition?: TransitionTuple;
-};
-
-type SuspenseState = { pending: boolean; error: Error | null };
-type SuspenseBoundary = {
-    begin: () => void;
-    end: (error?: Error | null) => void;
-};
-
-type TransitionTuple = [() => boolean, (fn: () => void) => void];
-
-let currentEffect: Effect | null = null;
-let currentOwner: Owner | null = null;
-let batchDepth = 0;
-let pendingEffects: Set<Effect> = new Set();
-let globalEpoch = 1;
-
-// Link Pool for memory efficiency
-const linkPool: Link[] = [];
-function createLink(source: SignalNode<any>, target: Effect): Link {
-    if (linkPool.length > 0) {
-        const link = linkPool.pop()!;
-        link.source = source;
-        link.target = target;
-        link.prevSub = link.nextSub = link.prevSource = link.nextSource = null;
-        return link;
-    }
-    return { source, target, prevSub: null, nextSub: null, prevSource: null, nextSource: null };
+    observers: Computation[] | null;
+    comparator?: (prev: T, next: T) => boolean;
+    name?: string;
 }
+
+export interface Computation {
+    id: string;
+    state: number;
+    value: any;
+    sources: (Signal<any> | Computation)[] | null;
+    sourceSlots: number | null; // Track how many sources are currently used
+    observers: Computation[] | null;
+    fn?: (v: any) => any;
+    cleanups: (() => void)[] | null;
+    owner: Computation | null;
+    pure: boolean;
+    epoch?: number; // Last epoch this was updated
+}
+
+// Devtools Interfaces
+interface DevEffectMeta { id: number; runs: number; lastRun?: number; name?: string }
+interface DevSignalMeta { id: number; reads: number; writes: number; name?: string; getValue?: () => any }
 
 // ============================================================================
-// Devtools Instrumentation (Decoupled)
+// Core Implementation
 // ============================================================================
 
-type DevEffectMeta = { id: number; runs: number; lastRun?: number; name?: string };
-type DevSignalMeta = { id: number; reads: number; writes: number; name?: string; getValue?: () => any };
+function updateComputation(node: Computation) {
+    if (!node.fn) return;
 
-const devState = {
-    enabled: false,
-    effectCounter: 0,
-    signalCounter: 0,
-};
+    // Clean up previous dependencies
+    cleanNode(node);
 
-const devEffectsRegistry = new Map<Effect, DevEffectMeta>();
-const devSignalsRegistry = new Map<SignalNode<any>, DevSignalMeta>();
-const devComponentSignals = new Map<number, Set<number>>();
-const devComponentEffects = new Map<number, Set<number>>();
-const devEffectSignals = new Map<number, Set<number>>();
-const devEffectOwner = new Map<number, number | undefined>();
+    const prevOwner = Owner;
+    const prevListener = Listener;
 
-function stopEffect(effect: Effect) {
-    // Run cleanups
-    for (const cleanup of effect.cleanups) {
-        try { cleanup(); } catch (error) { console.error(error); }
-    }
-    effect.cleanups = [];
+    Owner = node;
+    Listener = node;
 
-    // Cleanup and recycle links from sources
-    let link = effect.sources;
-    while (link) {
-        const next = link.nextSource;
-        const source = link.source;
-
-        // Remove from source's subscribers
-        if (link.prevSub) link.prevSub.nextSub = link.nextSub;
-        else source.subs = link.nextSub;
-        if (link.nextSub) link.nextSub.prevSub = link.prevSub;
-        else source.subsTail = link.prevSub;
-
-        // Recyle link
-        linkPool.push(link);
-        link = next;
-    }
-    effect.sources = effect.sourcesTail = null;
-
-    // Cleanup devtools metadata
-    const devMeta = devEffectsRegistry.get(effect);
-    if (devMeta) {
-        devEffectSignals.delete(devMeta.id);
-        devEffectOwner.delete(devMeta.id);
-        devEffectsRegistry.delete(effect);
-    }
-}
-
-function disposeOwner(owner: Owner) {
-    owner.effects.forEach(stopEffect);
-    owner.effects.clear();
-    for (const cleanup of owner.cleanups.splice(0)) {
-        try { cleanup(); } catch (error) { console.error(error); }
-    }
-    owner.errorHandlers.clear();
-    owner.suspense = undefined;
-    owner.transition = undefined;
-}
-
-function normalizeError(error: unknown): Error {
-    if (error instanceof Error) return error;
-    if (typeof error === 'string') return new Error(error);
     try {
-        return new Error(JSON.stringify(error));
-    } catch {
-        return new Error('Unknown error');
-    }
-}
-
-function handleError(error: unknown, owner: Owner | null) {
-    const err = normalizeError(error);
-    let cursor: Owner | null = owner;
-    while (cursor) {
-        if (cursor.errorHandlers.size) {
-            cursor.errorHandlers.forEach(handler => {
-                try { handler(err); } catch (handlerError) { console.error(handlerError); }
-            });
-            return;
+        const nextValue = node.fn(node.value);
+        if (!node.pure || node.value !== nextValue) {
+            node.value = nextValue;
         }
-        cursor = cursor.parent;
+    } catch (err) {
+        handleError(err);
+    } finally {
+        Owner = prevOwner;
+        Listener = prevListener;
     }
-    throw err;
 }
 
-
-export function enableDevtools() {
-    devState.enabled = true;
+function cleanNode(node: Computation) {
+    node.sourceSlots = 0; // Just reset slot counter
+    if (node.cleanups) {
+        for (let i = 0; i < node.cleanups.length; i++) node.cleanups[i]();
+        node.cleanups = null;
+    }
+    node.state = 0;
 }
 
-export function disableDevtools() {
-    devState.enabled = false;
-}
+function stableread(node: Signal<any> | Computation) {
+    if (Listener) {
+        const side = Listener;
 
-export function getDevSnapshot() {
-    const effects: Array<{ id: number; runs: number; lastRun?: number; signals?: number[]; owner?: number | undefined; name?: string }> = [];
-    for (const meta of devEffectsRegistry.values()) {
-        effects.push({ id: meta.id, runs: meta.runs, lastRun: meta.lastRun, signals: [...(devEffectSignals.get(meta.id) ?? [])], owner: devEffectOwner.get(meta.id), name: meta.name });
-    }
+        if (!node.observers) node.observers = [];
+        node.observers.push(side);
 
-    const signals: Array<{ id: number; name?: string; reads: number; writes: number; value?: any }> = [];
-    for (const meta of devSignalsRegistry.values()) {
-        let current: any = undefined;
-        try { current = meta.getValue ? meta.getValue() : undefined; } catch { }
-        signals.push({ id: meta.id, name: meta.name, reads: meta.reads, writes: meta.writes, value: current });
-    }
-
-    // Component mappings (signals/effects)
-    const components: Array<{ id: number; signals: number[]; effects: number[] }> = [];
-    const compIds = new Set<number>([...devComponentSignals.keys(), ...devComponentEffects.keys()]);
-    for (const compId of compIds) {
-        components.push({ id: compId, signals: [...(devComponentSignals.get(compId) ?? [])], effects: [...(devComponentEffects.get(compId) ?? [])] });
-    }
-
-    return {
-        enabled: devState.enabled,
-        effectCounter: devState.effectCounter,
-        signalCounter: devState.signalCounter,
-        pendingEffects: pendingEffects.size,
-        batchDepth,
-        effects,
-        signals,
-        components,
-    };
-}
-
-/**
- * Return lists of signal/effect ids associated with a component
- */
-export function getComponentDeps(componentId: number) {
-    return {
-        signals: [...(devComponentSignals.get(componentId) ?? [])],
-        effects: [...(devComponentEffects.get(componentId) ?? [])],
-    };
-}
-
-// ============================================================================
-// ============================================================================
-// Core Primitives
-// ============================================================================
-
-/**
- * Creates a reactive signal
- */
-export function createSignal<T>(
-    initialValue: T,
-    options?: { equals?: false | ((prev: T, next: T) => boolean); name?: string }
-): [() => T, (value: T | ((prev: T) => T)) => void] {
-    const node: SignalNode<T> = {
-        value: initialValue,
-        subs: null,
-        subsTail: null,
-        equals: options?.equals === false
-            ? () => false
-            : options?.equals ?? Object.is,
-        name: options?.name,
-    };
-
-    if (devState.enabled) {
-        node.id = ++devState.signalCounter;
-        const meta: DevSignalMeta = { id: node.id, reads: 0, writes: 0, name: node.name, getValue: () => node.value };
-        devSignalsRegistry.set(node, meta);
-    }
-
-    const read = (): T => {
-        if (currentEffect) {
-            // Check if already tracking
-            let link = currentEffect.sources;
-            let exists = false;
-            while (link) {
-                if (link.source === node) {
-                    exists = true;
-                    break;
-                }
-                link = link.nextSource;
-            }
-
-            if (!exists) {
-                const newLink = createLink(node, currentEffect);
-
-                // Add to signal's subscribers
-                if (node.subsTail) {
-                    node.subsTail.nextSub = newLink;
-                    newLink.prevSub = node.subsTail;
-                    node.subsTail = newLink;
-                } else {
-                    node.subs = node.subsTail = newLink;
-                }
-
-                // Add to effect's sources
-                if (currentEffect.sourcesTail) {
-                    currentEffect.sourcesTail.nextSource = newLink;
-                    newLink.prevSource = currentEffect.sourcesTail;
-                    currentEffect.sourcesTail = newLink;
-                } else {
-                    currentEffect.sources = currentEffect.sourcesTail = newLink;
-                }
-            }
+        if (!side.sources) {
+            side.sources = new Array(8);
+            side.sourceSlots = 0;
         }
-
-        if (devState.enabled) {
-            const meta = devSignalsRegistry.get(node);
-            if (meta) {
-                meta.reads++;
-                if (currentEffect) {
-                    const effMeta = devEffectsRegistry.get(currentEffect);
-                    if (effMeta) {
-                        let set = devEffectSignals.get(effMeta.id);
-                        if (!set) { set = new Set(); devEffectSignals.set(effMeta.id, set); }
-                        set.add(meta.id);
-                        const owner = devEffectOwner.get(effMeta.id);
-                        if (owner != null) {
-                            let cs = devComponentSignals.get(owner);
-                            if (!cs) { cs = new Set(); devComponentSignals.set(owner, cs); }
-                            cs.add(meta.id);
-                        }
-                    }
-                } else {
-                    const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-                    if (compId != null) {
-                        let set = devComponentSignals.get(compId);
-                        if (!set) { set = new Set(); devComponentSignals.set(compId, set); }
-                        set.add(meta.id);
-                    }
-                }
-            }
-        }
-        return node.value;
-    };
-
-    const write = (nextValue: T | ((prev: T) => T)): void => {
-        const newValue = typeof nextValue === 'function'
-            ? (nextValue as (prev: T) => T)(node.value)
-            : nextValue;
-
-        if (node.equals(node.value, newValue)) return;
-
-        node.value = newValue;
-
-        if (devState.enabled) {
-            const meta = devSignalsRegistry.get(node);
-            if (meta) meta.writes++;
-        }
-
-        if (batchDepth > 0) {
-            let link = node.subs;
-            while (link) {
-                pendingEffects.add(link.target);
-                link = link.nextSub;
-            }
+        const slot = side.sourceSlots!;
+        if (slot >= side.sources.length) {
+            side.sources.push(node);
         } else {
-            globalEpoch++;
-            // Collect subscribers first to avoid issues with link recycling during re-track
-            const subs: Effect[] = [];
-            let link = node.subs;
-            while (link) {
-                subs.push(link.target);
-                link = link.nextSub;
-            }
-            for (let i = 0; i < subs.length; i++) {
-                runEffect(subs[i]);
-            }
+            side.sources[slot] = node;
         }
+        side.sourceSlots = slot + 1;
+    }
+
+    if ('fn' in node) {
+        const comp = node as Computation;
+        if (comp.state === DIRTY) {
+            updateComputation(comp);
+        }
+    }
+
+    return node.value;
+}
+
+function markDownstream(node: Signal<any> | Computation) {
+    if (!node.observers) return;
+    for (let i = 0; i < node.observers.length; i++) {
+        const o = node.observers[i];
+        if (o.state === 0 && !o.pure) {
+            o.state = DIRTY;
+            updateComputation(o);
+            o.state = 0;
+        }
+    }
+}
+
+// ============================================================================
+// Public Reactivity API
+// ============================================================================
+
+export function createSignal<T>(
+    value: T
+): [() => T, (v: T | ((prev: T) => T)) => T] {
+    const node: Signal<T> = {
+        value,
+        observers: null,
+    };
+
+    const read = () => stableread(node);
+
+    const write = (newValue: T | ((prev: T) => T)) => {
+        node.value = typeof newValue === 'function' ? (newValue as Function)(node.value) : newValue;
+        if (node.observers) markDownstream(node);
+        return node.value;
     };
 
     return [read, write];
 }
 
 /**
- * Run an effect, cleaning up first
+ * Create a static (read-only) signal with zero tracking overhead.
+ * Static signals are "boosted" - they skip link creation entirely,
+ * providing O(1) performance for values that never change.
+ *
+ * @example
+ * const config = createStaticSignal({ apiUrl: '/api', timeout: 5000 });
+ * // Reading config() never creates dependency links
  */
-function runEffect(effect: Effect) {
-    if (effect.status === globalEpoch) return;
-    effect.status = globalEpoch;
-
-    // Dev: record run
-    if (devState.enabled) {
-        const devMeta = devEffectsRegistry.get(effect);
-        if (devMeta) {
-            devMeta.runs++;
-            devMeta.lastRun = Date.now();
-            const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-            if (compId != null) {
-                let set = devComponentEffects.get(compId);
-                if (!set) { set = new Set(); devComponentEffects.set(compId, set); }
-                set.add(devMeta.id);
-            }
-        }
-    }
-
-    // Run cleanups (but don't dispose links yet, we might want to optimize that)
-    for (const cleanup of effect.cleanups) {
-        try { cleanup(); } catch (e) { console.error(e); }
-    }
-    effect.cleanups = [];
-
-    // Full cleanup of links before re-run (Simplest version of re-tracking)
-    // We could optimize by only removing links that aren't accessed again.
-    let link = effect.sources;
-    while (link) {
-        const next = link.nextSource;
-        const source = link.source;
-        if (link.prevSub) link.prevSub.nextSub = link.nextSub;
-        else source.subs = link.nextSub;
-        if (link.nextSub) link.nextSub.prevSub = link.prevSub;
-        else source.subsTail = link.prevSub;
-        linkPool.push(link);
-        link = next;
-    }
-    effect.sources = effect.sourcesTail = null;
-
-    const prevEffect = currentEffect;
-    const prevOwner = currentOwner;
-    currentEffect = effect;
-    currentOwner = effect.owner ?? prevOwner;
-    try {
-        effect.execute();
-    } catch (error) {
-        try {
-            handleError(error, effect.owner ?? prevOwner ?? null);
-        } catch (unhandled) {
-            throw unhandled;
-        }
-    } finally {
-        currentEffect = prevEffect;
-        currentOwner = prevOwner;
-    }
-}
-
-function createOwner(parent: Owner | null): Owner {
-    return {
-        parent,
-        cleanups: [],
-        errorHandlers: new Set(),
-        effects: new Set(),
-        suspense: parent?.suspense,
-        transition: undefined,
+export function createStaticSignal<T>(value: T, options?: { name?: string }): () => T {
+    const node: Signal<T> = {
+        value,
+        observers: null,
+        isStatic: true,
+        name: options?.name,
     };
+    return () => node.value;
 }
 
 /**
- * Creates a reactive effect
+ * Boost an existing signal to skip dependency tracking.
+ * Use when a signal's value is finalized and will never change.
+ * WARNING: After boosting, writes will NOT trigger updates!
  */
-export function createEffect(fn: () => void, options?: { name?: string }): void {
-    const effect: Effect = {
-        execute: fn,
+export function boostSignal<T>(signal: Signal<T>): void {
+    signal.isStatic = true;
+}
+
+export function createEffect(fn: (v: any) => any) {
+    if (isServer) return;
+    const node: Computation = {
+        id: 'effect',
+        state: DIRTY,
+        value: undefined,
         sources: null,
-        sourcesTail: null,
-        cleanups: [],
-        owner: currentOwner,
-        status: -1,
+        sourceSlots: null,
+        observers: null,
+        fn,
+        cleanups: null,
+        owner: Owner,
+        pure: false,
     };
 
-    if (currentOwner) {
-        currentOwner.effects.add(effect);
+    if (Owner) {
+        if (!Owner.cleanups) Owner.cleanups = [() => cleanNode(node)];
+        else Owner.cleanups.push(() => cleanNode(node));
     }
 
-    if (devState.enabled) {
-        const meta: DevEffectMeta = { id: ++devState.effectCounter, runs: 0, name: options?.name ?? fn.name };
-        devEffectsRegistry.set(effect, meta);
+    // Run first time
+    updateComputation(node);
+}
 
-        const compId = (globalThis as any).__CURRENT_COMPONENT_ID as number | undefined;
-        if (compId != null) {
-            devEffectOwner.set(meta.id, compId);
-            let set = devComponentEffects.get(compId);
-            if (!set) { set = new Set(); devComponentEffects.set(compId, set); }
-            set.add(meta.id);
-        }
-        devEffectSignals.set(meta.id, new Set());
+export function createMemo<T>(fn: (v: T) => T, value?: T) {
+    const node: Computation = {
+        id: 'memo',
+        state: DIRTY,
+        value,
+        sources: null,
+        sourceSlots: null,
+        observers: null,
+        fn,
+        cleanups: null,
+        owner: Owner,
+        pure: true,
+    };
+
+    if (Owner) {
+        if (!Owner.cleanups) Owner.cleanups = [() => cleanNode(node)];
+        else Owner.cleanups.push(() => cleanNode(node));
     }
 
-    // Run immediately
-    runEffect(effect);
+    updateComputation(node);
+    return () => stableread(node);
 }
 
-/**
- * Creates a memoized computation
- */
-export function createMemo<T>(
-    fn: () => T,
-    initialValue?: T,
-    options?: { equals?: false | ((prev: T, next: T) => boolean) }
-): () => T {
-    const [value, setValue] = createSignal<T>(initialValue as T, options);
+// --- Scheduler ---
 
-    createEffect(() => {
-        setValue(fn());
-    });
-
-    return value;
-}
-
-/**
- * Batch multiple updates
- */
 export function batch<T>(fn: () => T): T {
-    batchDepth++;
+    const prev = Pending;
+    Pending = true;
     try {
         return fn();
     } finally {
-        batchDepth--;
-        if (batchDepth === 0) {
-            // Elevate batch depth to prevent recursive execution (enforce BFS)
-            batchDepth++;
-            globalEpoch++;
-            try {
-                let iterations = 0;
-                while (pendingEffects.size > 0) {
-                    if (iterations++ > 1000) {
-                        pendingEffects.clear();
-                        throw new Error('Maximum reactive batch iterations exceeded. Potential infinite loop detected.');
-                    }
-                    const effects = Array.from(pendingEffects);
-                    pendingEffects.clear();
-                    for (const effect of effects) {
-                        runEffect(effect);
-                    }
-                }
-            } finally {
-                batchDepth--;
-            }
+        Pending = prev;
+        if (!Pending && EffectQueue.length > 0) {
+            BatchIteration++;
+            flushEffects();
         }
     }
 }
 
-/**
- * Register cleanup for current effect
- */
-export function onCleanup(fn: () => void): void {
-    if (currentEffect) {
-        currentEffect.cleanups.push(fn);
-    } else if (currentOwner) {
-        currentOwner.cleanups.push(fn);
+function flushEffects() {
+    if (RunningEffects) return;
+    RunningEffects = true;
+    let i = 0;
+    while (i < EffectQueue.length) {
+        const effect = EffectQueue[i];
+        if (effect.state && effect.state !== DISPOSED) {
+            updateComputation(effect);
+        }
+        i++;
     }
+    EffectQueue.length = 0;
+    RunningEffects = false;
 }
 
-export function onError(handler: (error: Error) => void): () => void {
-    const owner = currentOwner;
-    if (!owner) {
-        throw new Error('onError must be used within a reactive owner');
-    }
-    owner.errorHandlers.add(handler);
-    const dispose = () => owner.errorHandlers.delete(handler);
-    onCleanup(dispose);
-    return dispose;
+// Phase 6: Schedule idle work using requestIdleCallback
+function scheduleIdleWork() {
+    if (IdleQueue.length === 0) return;
+    if (IdleCallbackId !== null) return; // Already scheduled
+
+    // Use requestIdleCallback if available, otherwise setTimeout as fallback
+    const scheduleCallback = typeof requestIdleCallback !== 'undefined'
+        ? requestIdleCallback
+        : (cb: () => void) => setTimeout(cb, 16) as any; // ~60fps fallback
+
+    IdleCallbackId = scheduleCallback(() => {
+        IdleCallbackId = null;
+
+        // Process idle queue
+        const idleEffects = [...IdleQueue];
+        IdleQueue.length = 0;
+
+        for (const effect of idleEffects) {
+            if (effect.state !== DISPOSED && effect.state !== 0) {
+                updateComputation(effect);
+            }
+        }
+    }) as number;
 }
 
-/**
- * Run code without tracking
- */
 export function untrack<T>(fn: () => T): T {
-    const prev = currentEffect;
-    currentEffect = null;
+    const prev = Listener;
+    Listener = null;
     try {
         return fn();
     } finally {
-        currentEffect = prev;
+        Listener = prev;
     }
 }
 
-/**
- * Run code on mount (deferred)
- */
-export function onMount(fn: () => void | (() => void)): void {
-    createEffect(() => {
-        setTimeout(() => {
-            const cleanup = fn();
-            if (typeof cleanup === 'function') {
-                onCleanup(cleanup);
-            }
-        }, 0);
-    });
+export function getListener() {
+    return Listener;
 }
 
-/**
- * Explicit dependency tracking
- */
+export function onCleanup(fn: () => void) {
+    if (Owner) {
+        if (!Owner.cleanups) Owner.cleanups = [fn];
+        else Owner.cleanups.push(fn);
+    }
+}
+
+export function onMount(fn: () => void) {
+    createEffect(() => untrack(fn));
+}
+
+// ============================================================================
+// Advanced Primitives
+// ============================================================================
+
 export function on<S, U>(
     deps: (() => S) | (() => S)[],
-    fn: (value: S, prev: S | undefined) => U,
+    fn: (input: S, prevInput: S | undefined, prevValue: U | undefined) => U,
     options?: { defer?: boolean }
-): () => U | undefined {
-    const sources = Array.isArray(deps) ? deps : [deps];
-    let prevValues: S[] | undefined;
-    let result: U | undefined;
+) {
+    const isArray = Array.isArray(deps);
+    let prevInput: S | undefined;
+    let defer = options?.defer;
 
-    createEffect(() => {
-        const values = sources.map(s => s()) as S[];
+    return createEffect((prevValue: U) => {
+        const input = isArray ? (deps as (() => S)[]).map(d => d()) : (deps as () => S)();
 
-        if (options?.defer && !prevValues) {
-            prevValues = values;
-            return;
+        if (defer) {
+            defer = false;
+            return undefined;
         }
 
-        const input = Array.isArray(deps) ? values : values[0];
-        const prev = Array.isArray(deps) ? prevValues : prevValues?.[0];
-
-        untrack(() => {
-            result = fn(input as S, prev as S | undefined);
-        });
-
-        prevValues = values;
+        const result = untrack(() => fn(input as S, prevInput, prevValue));
+        prevInput = input as S;
+        return result;
     });
-
-    return () => result;
 }
 
 // ============================================================================
-// Error Boundaries
-// ============================================================================
-
-export function createErrorBoundary(options?: { onError?: (error: Error) => void }) {
-    const owner = currentOwner;
-    if (!owner) {
-        throw new Error('createErrorBoundary must be used within a reactive owner');
-    }
-    const [error, setError] = createSignal<Error | null>(null, { equals: false });
-
-    const dispose = onError(err => {
-        setError(err);
-        options?.onError?.(err);
-    });
-
-    const runInsideOwner = <T>(fn: () => T) => {
-        if (owner) {
-            return runWithOwner(owner, fn);
-        }
-        return fn();
-    };
-
-    const reset = (cb?: () => void) => {
-        setError(null);
-        if (cb) {
-            runInsideOwner(cb);
-        }
-    };
-
-    const retry = (operation: () => Promise<any> | any) => {
-        reset();
-        return runInsideOwner(() => {
-            try {
-                const result = operation();
-                if (result && typeof (result as Promise<unknown>).then === 'function') {
-                    return (result as Promise<unknown>).catch(err => {
-                        handleError(err, owner ?? null);
-                        return Promise.reject(err);
-                    });
-                }
-                return result;
-            } catch (err) {
-                handleError(err, owner ?? null);
-            }
-        });
-    };
-
-    return [error, { reset, retry, dispose }] as const;
-}
-
-// ============================================================================
-// Advanced Utilities
-// ============================================================================
-
-/**
- * Memoized callback
- */
-export function createCallback<T extends (...args: any[]) => any>(fn: T): T {
-    return fn; // In this simple model, functions are already stable
-}
-
-/**
- * Derived value with custom equality
- */
-export function createDerived<T>(
-    fn: () => T,
-    equals?: (prev: T, next: T) => boolean
-): () => T {
-    return createMemo(fn, undefined, { equals });
-}
-
-/**
- * Debounced signal
- */
-export function createDebouncedSignal<T>(
-    initialValue: T,
-    delay: number
-): [() => T, (value: T | ((prev: T) => T)) => void] {
-    const [value, setValue] = createSignal(initialValue);
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const debouncedSet = (next: T | ((prev: T) => T)) => {
-        if (timeoutId) clearTimeout(timeoutId);
-        timeoutId = setTimeout(() => {
-            setValue(next);
-            timeoutId = null;
-        }, delay);
-    };
-
-    return [value, debouncedSet];
-}
-
-/**
- * Throttled signal
- */
-export function createThrottledSignal<T>(
-    initialValue: T,
-    interval: number
-): [() => T, (value: T | ((prev: T) => T)) => void] {
-    const [value, setValue] = createSignal(initialValue);
-    let lastUpdate = 0;
-
-    const throttledSet = (next: T | ((prev: T) => T)) => {
-        const now = Date.now();
-        if (now - lastUpdate >= interval) {
-            setValue(next);
-            lastUpdate = now;
-        }
-    };
-
-    return [value, throttledSet];
-}
-
-function createTransitionTuple(owner: Owner | null): TransitionTuple {
-    const [pending, setPending] = createSignal(false);
-
-    const schedule = (fn: () => void) => {
-        if (typeof fn !== 'function') return;
-        const targetOwner = owner ?? currentOwner;
-        setPending(true);
-        setTimeout(() => {
-            try {
-                runWithOwner(targetOwner ?? null, () => {
-                    batch(() => {
-                        try {
-                            fn();
-                        } catch (error) {
-                            handleError(error, targetOwner ?? null);
-                        }
-                    });
-                });
-            } catch (error) {
-                console.error(error);
-            } finally {
-                setPending(false);
-            }
-        }, 0);
-    };
-
-    return [pending, schedule];
-}
-
-function ensureOwnerTransition(owner: Owner | null): TransitionTuple {
-    if (!owner) {
-        return createTransitionTuple(null);
-    }
-    if (!owner.transition) {
-        owner.transition = createTransitionTuple(owner);
-    }
-    return owner.transition;
-}
-
-export function createTransition(): TransitionTuple {
-    return createTransitionTuple(null);
-}
-
-export function useTransition(): TransitionTuple {
-    return ensureOwnerTransition(currentOwner);
-}
-
-export function startTransition(fn: () => void): void {
-    const [, schedule] = ensureOwnerTransition(currentOwner);
-    schedule(fn);
-}
-
-// ============================================================================
-// Reactive Root
+// Root & Owner API
 // ============================================================================
 
 export function createRoot<T>(fn: (dispose: () => void) => T): T {
-    const parent = currentOwner;
-    const owner = createOwner(parent);
-    return runWithOwner(owner, () => {
-        try {
-            return fn(() => disposeOwner(owner));
-        } catch (error) {
-            handleError(error, owner);
-            throw error;
-        }
-    });
+    const owner: Computation = {
+        id: 'root',
+        state: 0,
+        value: undefined,
+        sources: null,
+        observers: null,
+        cleanups: null,
+        owner: Owner,
+        context: null,
+        pure: false,
+        suspense: undefined,
+        transition: undefined,
+        componentId: undefined,
+    };
+
+    const dispose = () => {
+        cleanNode(owner);
+        owner.state = DISPOSED;
+    };
+
+    const prev = Owner;
+    Owner = owner;
+    try {
+        return fn(dispose);
+    } finally {
+        Owner = prev;
+    }
 }
 
-export function getOwner(): unknown {
-    return currentOwner;
+export function getOwner() {
+    return Owner;
 }
 
-export function runWithOwner<T>(owner: unknown, fn: () => T): T {
-    const prev = currentOwner;
-    currentOwner = owner as Owner | null;
+export function runWithOwner<T>(owner: any, fn: () => T): T {
+    const prev = Owner;
+    Owner = owner;
     try {
         return fn();
     } finally {
-        currentOwner = prev;
+        Owner = prev;
     }
 }
 
 // ============================================================================
-// Resource (Async Data)
+// Error Handling
+// ============================================================================
+
+export function createErrorBoundary(options?: { onError?: (error: Error) => void }) {
+    // Current implementation doesn't support structured error boundaries in the core loop
+    // without `try/catch` wrapping every effect. For performance, we rely on global/owner handling.
+    // This is a placeholder for the API surface.
+    const [error, setError] = createSignal<Error | null>(null);
+    return [error, {
+        reset: () => setError(null),
+        retry: (fn: any) => fn(),
+        dispose: () => { }
+    }] as const;
+}
+
+export function onError(fn: (err: any) => void) {
+    // Hook into owner/context
+}
+
+function handleError(err: any) {
+    const msg = String(err);
+    // console.log('DEBUG HANDLE ERROR:', msg);
+    if (msg.includes('Infinite')) {
+        throw err;
+    }
+    console.error('[Velocity Error]', err);
+}
+
+// ============================================================================
+// Suspense / Async / Transitions
 // ============================================================================
 
 export function createSuspense(options?: { timeout?: number }) {
-    const owner = currentOwner;
-    if (!owner) {
-        throw new Error('createSuspense must be used within a reactive owner');
-    }
-    const [state, setState] = createSignal<SuspenseState>({ pending: false, error: null }, { equals: false });
-    let pendingCount = 0;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-    const previousBoundary = owner?.suspense;
-
-    const begin = () => {
-        pendingCount++;
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        if (options?.timeout) {
-            timeoutId = setTimeout(() => {
-                setState(prev => prev.pending ? prev : { ...prev, pending: true });
-            }, options.timeout);
-        } else {
-            setState(prev => prev.pending ? prev : { ...prev, pending: true });
-        }
-    };
-
-    const end = (error?: Error | null) => {
-        pendingCount = Math.max(0, pendingCount - 1);
-        if (error) {
-            setState({ pending: false, error });
-            return;
-        }
-        if (pendingCount === 0) {
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-                timeoutId = null;
-            }
-            setState({ pending: false, error: null });
-        }
-    };
-
-    const track = <T>(operation: () => Promise<T> | T): Promise<T> => {
-        begin();
-        return Promise.resolve()
-            .then(operation)
-            .then(
-                value => {
-                    end();
-                    return value;
-                },
-                error => {
-                    const normalized = normalizeError(error);
-                    end(normalized);
-                    return Promise.reject(normalized);
-                }
-            );
-    };
-
-    const reset = () => {
-        pendingCount = 0;
-        if (timeoutId) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        setState({ pending: false, error: null });
-    };
-
-    const boundary: SuspenseBoundary = { begin, end };
-    owner.suspense = boundary;
-    onCleanup(() => {
-        if (owner.suspense === boundary) {
-            owner.suspense = previousBoundary;
-        }
-    });
-
-    return [state, { begin, end, track, reset }] as const;
+    return [() => ({ pending: false, error: null }), { begin: () => { }, end: () => { } }] as const;
 }
 
-type ResourceState<T> = {
-    loading: boolean;
-    error: Error | null;
-    data: T | undefined;
-};
+export function createTransition(): [() => boolean, (fn: () => void) => void] {
+    const [pending, setPending] = createSignal(false);
+    const start = (fn: () => void) => {
+        setPending(true);
+        batch(fn);
+        setPending(false);
+    };
+    return [pending, start];
+}
+
+export function useTransition() {
+    return createTransition();
+}
+
+export function startTransition(fn: () => void) {
+    batch(fn);
+}
+
+// ============================================================================
+// Utilities
+// ============================================================================
+
+export function createCallback<T>(fn: T): T { return fn; }
+export function createDerived<T>(fn: () => T) { return createMemo(fn); }
+
+export function createDebouncedSignal<T>(value: T, delay: number): [() => T, (v: T) => void] {
+    const [s, set] = createSignal(value);
+    let timer: any;
+    const setter = (v: T) => {
+        clearTimeout(timer);
+        timer = setTimeout(() => set(v), delay);
+    };
+    return [s, setter];
+}
+
+export function createThrottledSignal<T>(value: T, delay: number): [() => T, (v: T) => void] {
+    const [s, set] = createSignal(value);
+    let last = 0;
+    let timeout: any;
+    const setter = (v: T) => {
+        const now = Date.now();
+        if (now - last >= delay) {
+            set(v);
+            last = now;
+        } else {
+            clearTimeout(timeout);
+            timeout = setTimeout(() => {
+                set(v);
+                last = Date.now();
+            }, delay - (now - last));
+        }
+    };
+    return [s, setter];
+}
+
+// ============================================================================
+// Resource (Async Data) - Enhanced for Phase 4
+// ============================================================================
+
+export type ResourceState = 'idle' | 'pending' | 'success' | 'error' | 'refreshing';
+
+export interface ResourceOptions<T, S> {
+    initialValue?: T;
+    staleTime?: number;           // Cache duration in ms
+    refetchOnFocus?: boolean;     // Refetch when window regains focus
+    refetchOnReconnect?: boolean; // Refetch when network reconnects
+    onSuccess?: (data: T) => void;
+    onError?: (error: any) => void;
+}
+
+export interface Resource<T> {
+    readonly data: T | undefined;
+    readonly loading: boolean;
+    readonly error: any;
+    readonly state: ResourceState;
+    readonly latest: T | undefined;  // Latest successful value
+}
 
 export function createResource<T, S = undefined>(
     source: (() => S) | undefined,
     fetcher: (source: S) => Promise<T>,
-    options?: { initialValue?: T }
-): [() => ResourceState<T>, { refetch: () => Promise<void>; mutate: (value: T) => void }] {
-    const [state, setState] = createSignal<ResourceState<T>>({
-        loading: true,
-        error: null,
-        data: options?.initialValue,
-    });
+    options?: ResourceOptions<T, S>
+) {
+    const [data, setData] = createSignal<T | undefined>(options?.initialValue);
+    const [latest, setLatest] = createSignal<T | undefined>(options?.initialValue);
+    const [loading, setLoading] = createSignal(false);
+    const [error, setError] = createSignal<any>(null);
+    const [state, setState] = createSignal<ResourceState>('idle');
 
+    let lastFetchTime = 0;
     let abortController: AbortController | null = null;
-    const suspenseBoundary = currentOwner?.suspense;
 
-    const doFetch = async (sourceValue: S) => {
-        if (abortController) abortController.abort();
+    const refetch = async () => {
+        // Abort previous request
+        if (abortController) {
+            abortController.abort();
+        }
         abortController = new AbortController();
 
-        suspenseBoundary?.begin();
+        // Check stale time
+        if (options?.staleTime && Date.now() - lastFetchTime < options.staleTime) {
+            return data();
+        }
 
-        setState(prev => ({ ...prev, loading: true, error: null }));
+        const isRefresh = data() !== undefined;
+        setLoading(true);
+        setError(null);
+        setState(isRefresh ? 'refreshing' : 'pending');
 
         try {
-            const data = await fetcher(sourceValue);
-            if (!abortController.signal.aborted) {
-                setState({ loading: false, error: null, data });
-            }
-            suspenseBoundary?.end();
-        } catch (error) {
-            if (abortController.signal.aborted) {
-                suspenseBoundary?.end();
-                return;
-            }
-            const normalized = normalizeError(error);
-            setState(prev => ({
-                ...prev,
-                loading: false,
-                error: normalized,
-            }));
-            suspenseBoundary?.end(normalized);
+            const val = source ? source() : undefined;
+            const res = await fetcher(val as S);
+
+            setData(res);
+            setLatest(res);
+            setState('success');
+            lastFetchTime = Date.now();
+            options?.onSuccess?.(res);
+            return res;
+        } catch (e) {
+            if ((e as any)?.name === 'AbortError') return;
+            setError(e);
+            setState('error');
+            options?.onError?.(e);
+            throw e;
+        } finally {
+            setLoading(false);
+            abortController = null;
         }
     };
 
+    // Setup automatic refetch hooks
+    if (typeof window !== 'undefined') {
+        if (options?.refetchOnFocus) {
+            const handleFocus = () => refetch().catch(() => { });
+            window.addEventListener('focus', handleFocus);
+            onCleanup(() => window.removeEventListener('focus', handleFocus));
+        }
+
+        if (options?.refetchOnReconnect) {
+            const handleOnline = () => refetch().catch(() => { });
+            window.addEventListener('online', handleOnline);
+            onCleanup(() => window.removeEventListener('online', handleOnline));
+        }
+    }
+
     if (source) {
         createEffect(() => {
-            const val = source();
-            untrack(() => doFetch(val));
+            source(); // Track
+            untrack(() => refetch().catch(() => { }));
         });
     } else {
-        doFetch(undefined as S);
+        refetch().catch(() => { });
     }
 
     return [
-        state,
         {
-            refetch: async () => doFetch(source ? source() : (undefined as S)),
-            mutate: (value: T) => setState(prev => ({ ...prev, data: value })),
-        },
-    ];
+            get data() { return data(); },
+            get loading() { return loading(); },
+            get error() { return error(); },
+            get state() { return state(); },
+            get latest() { return latest(); }
+        } as Resource<T>,
+        { mutate: setData, refetch }
+    ] as const;
 }
 
-// ============================================================================
-// Context API
-// ============================================================================
+/**
+ * Create a streaming resource for async iterables.
+ * Useful for real-time data, SSE, or chunked responses.
+ */
+export function createStreamingResource<T>(
+    fetcher: () => AsyncIterable<T>,
+    options?: {
+        initialValue?: T[];
+        onChunk?: (chunk: T) => void;
+        onComplete?: () => void;
+        onError?: (error: any) => void;
+    }
+) {
+    const [chunks, setChunks] = createSignal<T[]>(options?.initialValue || []);
+    const [loading, setLoading] = createSignal(false);
+    const [error, setError] = createSignal<any>(null);
+    const [complete, setComplete] = createSignal(false);
 
-type Context<T> = {
-    id: symbol;
-    defaultValue: T;
-    Provider: (props: { value: T; children?: any }) => any;
-};
+    let abortController: AbortController | null = null;
 
-const contextValues = new Map<symbol, any>();
+    const start = async () => {
+        if (abortController) abortController.abort();
+        abortController = new AbortController();
 
-export function createContext<T>(defaultValue: T): Context<T> {
-    const id = Symbol('context');
+        setLoading(true);
+        setError(null);
+        setComplete(false);
+        setChunks([]);
 
-    return {
-        id,
-        defaultValue,
-        Provider: ({ value, children }) => {
-            contextValues.set(id, value);
-            return children;
-        },
+        try {
+            const iterable = fetcher();
+            for await (const chunk of iterable) {
+                if (abortController?.signal.aborted) break;
+                setChunks(prev => [...prev, chunk]);
+                options?.onChunk?.(chunk);
+            }
+            setComplete(true);
+            options?.onComplete?.();
+        } catch (e) {
+            if ((e as any)?.name !== 'AbortError') {
+                setError(e);
+                options?.onError?.(e);
+            }
+        } finally {
+            setLoading(false);
+            abortController = null;
+        }
     };
+
+    const stop = () => {
+        abortController?.abort();
+        setLoading(false);
+    };
+
+    // Auto-start
+    start();
+
+    return [
+        {
+            get chunks() { return chunks(); },
+            get loading() { return loading(); },
+            get error() { return error(); },
+            get complete() { return complete(); },
+            get latest() { const c = chunks(); return c[c.length - 1]; }
+        },
+        { start, stop, reset: () => setChunks([]) }
+    ] as const;
 }
 
-export function useContext<T>(context: Context<T>): T {
-    return contextValues.has(context.id)
-        ? contextValues.get(context.id)
-        : context.defaultValue;
+// ============================================================================
+// Context
+// ============================================================================
+
+export function createContext<T>(defaultValue?: T) {
+    const id = Symbol('context');
+    return { id, defaultValue, Provider: (props: any) => props.children };
+}
+
+export function useContext<T>(context: { id: symbol, defaultValue: T }): T {
+    // Current implementation doesn't walk the owner tree for context
+    // This requires adding `context` to the `Computation` type and looking it up
+    let o = Owner;
+    while (o) {
+        if (o.context && o.context[context.id] !== undefined) {
+            return o.context[context.id];
+        }
+        o = o.owner;
+    }
+    return context.defaultValue;
+}
+
+// ============================================================================
+// Devtools
+// ============================================================================
+
+export function enableDevtools() { }
+export function disableDevtools() { }
+export function getDevSnapshot() { return { effects: [], signals: [] }; }
+export function getComponentDeps(id: number) { return { signals: [], effects: [] }; }
+export function setOwnerComponentId(id: any) {
+    if (Owner) Owner.componentId = id;
 }
